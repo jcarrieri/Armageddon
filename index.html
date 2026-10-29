@@ -1,0 +1,581 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ARMAGEDDON — Prototype M5.18</title>
+  <link rel="stylesheet" href="src/styles.css">
+</head>
+<body class="pre-game">
+<script>if(new URLSearchParams(location.search).has("size"))document.body.className="game-started";</script>
+<style>
+#storyStage[hidden],#storyCard[hidden]{display:none!important}body.pre-game>.topbar,body.pre-game>main.layout{display:none!important}body.pre-game{margin:0;overflow:hidden;background:#07131c}#storyStage{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;padding:0;background:radial-gradient(ellipse at 50% 42%,#283f50 0%,#0a1722 70%,#060c13 100%);color:#f4f1e8;cursor:pointer;box-sizing:border-box}
+#storyStage.blue{background:radial-gradient(ellipse at 35% 38%,#244c73,#091a30 70%)}#storyStage.red{background:radial-gradient(ellipse at 65% 38%,#683138,#250e1a 70%)}#storyStage.setup{background:#08141de8;cursor:default}
+.story-card{max-width:780px;width:100%;text-align:center;padding:48px 38px;border:1px solid #b7a16b66;border-radius:16px;background:#07131cb9;box-shadow:0 20px 70px #0009}
+.story-kicker{font-size:14px;letter-spacing:.28em;color:#e7c780;font-weight:bold}.story-card h1{font-family:Georgia,serif;font-size:clamp(38px,6vw,76px);margin:18px 0 10px;letter-spacing:.07em}.story-card h2{font-size:clamp(23px,3vw,34px);margin:12px 0}.story-card p{font-size:clamp(16px,2vw,21px);line-height:1.7;color:#e1e7e9;max-width:680px;margin:20px auto}.story-continue{margin-top:35px;color:#f0c879;letter-spacing:.14em;font-size:13px;text-transform:uppercase}
+#storyStage.setup #mapSetupPanel{position:relative!important;inset:auto!important;transform:none!important;z-index:1!important;width:min(1450px,98vw)!important;max-height:96vh!important;box-sizing:border-box;margin:auto!important}#storyStage.setup{display:flex;align-items:center;justify-content:center;overflow-y:auto} #storyStage.setup #mapSetupPanel{flex:0 1 auto;align-self:center;margin:auto!important} .story-art{position:relative;display:block;max-width:100vw;max-height:100vh;overflow:hidden} .story-art img{display:block;width:100%;height:100%;object-fit:contain} .story-art.blue .button-mask,.story-art.red .button-mask{display:none} .story-art .button-mask{position:absolute;pointer-events:none;background:#08121cf2;box-shadow:0 0 12px 5px #08121ca6;border-radius:3px} .story-art.intro .button-mask{left:71.8%;top:89.2%;width:23%;height:8.2%} .story-art.blue .button-mask,.story-art.red .button-mask{left:39.5%;top:73.2%;width:21.5%;height:4.8%;background:#09111bef;box-shadow:0 0 9px 4px #09111bc0}
+.coffee-support{display:inline-flex;align-items:center;justify-content:center;white-space:nowrap;margin-left:auto;padding:9px 14px;border-radius:8px;background:#ffdd00;color:#181818;font-weight:800;text-decoration:none;box-shadow:0 2px 8px #0005}.coffee-support:hover{background:#ffe94d}body.pre-game .coffee-support{display:none}
+</style>
+<div id="storyStage" aria-live="polite"><div class="story-card" id="storyCard"></div></div>
+
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">A</span><div><strong>ARMAGEDDON</strong><small>Blue vs Red · Prototype M5.18</small></div></div>
+    <a href="https://buymeacoffee.com/billbuttso" target="_blank" rel="noopener noreferrer" class="coffee-support" title="Support the game on Buy Me a Coffee">☕ Buy Me a Coffee</a>
+    <div class="phase-pill" id="phaseLabel"><span class="status-dot"></span> PLANNING PHASE</div>
+  </header>
+  <main class="layout">
+    <section class="map-shell" aria-label="Battlefield map">
+      <div class="map-toolbar">
+        <div class="toolbar-group" style="display:none"><strong style="white-space:nowrap"><span id="blueRpGroup">Blue RP: <span id="rpBlueTotal">0.0</span></span><span id="redRpGroup" hidden> · Red RP: <span id="rpRedTotal">0.0</span></span></strong><button id="deployReinforcement" class="text-button">Deploy Reinforcement (<span id="reinforcementCount">0</span>)</button></div>
+        <div class="toolbar-group"><button id="soundToggle" class="text-button" aria-pressed="true" title="Toggle game sound">🔊 Sound: ON</button><button id="retreatSoundTest" hidden type="button">Retreat SFX</button><button id="surrenderSoundTest" hidden type="button">Surrender SFX</button><button id="replayTurnButton" class="text-button" title="Restore the start of the last executed turn and replay its orders">Replay Turn ↺</button><button id="saveGameButton" class="text-button" title="Save current game">Save Game</button><span id="gameSpeedWrap" style="position:relative;display:inline-block"><button id="gameSpeedButton" class="text-button" aria-expanded="false" title="Change animation speed during execution">Speed: Normal 100% ▾</button><fieldset id="gameSpeedMenu" hidden style="position:absolute;top:100%;left:0;z-index:100;background:#162938;color:white;border:1px solid #688293;border-radius:6px;padding:9px;min-width:145px;box-shadow:0 3px 12px #0008"><legend style="font-size:11px">Game speed</legend><label style="display:block;white-space:nowrap"><input type="radio" name="animationSpeed" value="0.5"> Slow 50%</label><label style="display:block;white-space:nowrap"><input type="radio" name="animationSpeed" value="1" checked> Normal 100%</label><label style="display:block;white-space:nowrap"><input type="radio" name="animationSpeed" value="2"> Fast 200%</label></fieldset></span><button id="readyButton" class="text-button" style="background:#2d644b;color:white;min-width:85px">Ready ▶</button><span id="tiLabel" style="font-weight:700;white-space:nowrap">Day 1 · Planning</span><span id="gameClock" style="font-weight:700;white-space:nowrap;padding:5px 9px;border:1px solid #688293;border-radius:5px" aria-live="polite">Day 1 · 7:00 AM</span><button id="playtestMode" class="text-button" aria-pressed="false" style="background:#374858;color:white;min-width:195px">Playtest Mode: OFF — BLUE ONLY</button><button id="unitSymbolsToggle" class="text-button" aria-pressed="false" title="Switch NATO and illustrated counters (U)">Unit Symbols: NATO</button><button id="replacementToggle" class="text-button" aria-pressed="false" title="Replacement packet overlay (R)">Replacements: OFF</button><button id="endPositionsToggle" class="text-button" aria-pressed="false" title="End positions preview (E)" title="Show projected division positions after 10 hours; combat and traffic may change the result">End Positions: OFF</button><button id="zocToggle" class="text-button" aria-pressed="false">Show ZOCs: OFF</button><button id="citiesOverlayToggle" class="text-button" aria-pressed="false" title="Highlight cities producing divisions">Cities: OFF</button><button id="hexControlToggle" class="text-button" aria-pressed="false">Hex Control: OFF</button><button id="mapControlsToggle" class="text-button" aria-pressed="false">Map Controls ?</button><button id="dayReportButton" class="text-button">Last Day Report</button><button id="mapSetupToggle" class="text-button">Map Setup ⚙</button></div>
+      </div>
+      <div id="mapSetupPanel" hidden style="position:absolute;z-index:40;top:150px;left:50%;transform:translateX(-50%);background:#172634;color:#eaf4ff;border:2px solid #8ea5b5;border-radius:10px;padding:20px;width:min(1000px,96%);box-shadow:0 10px 45px #000b;max-height:70%;overflow:auto">
+        <h2 style="margin:0 0 6px">Map Setup — Battlefield and Deployment</h2>
+        <p style="font-size:12px;margin:0 0 14px">Choose how much terrain to generate. Applying starts a new game and clears current orders.</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+          <label style="font-size:13px">Map size<select id="mapSize" style="display:block;width:100%;padding:8px;background:#293d4b;color:white"><option value="small">Small (×0.5)</option><option value="medium">Medium (×1)</option><option value="large">Large (×2)</option><option value="huge">Huge (×3)</option></select></label>
+          <label style="font-size:13px">Deployment<select id="deployment" style="display:block;width:100%;padding:8px;background:#293d4b;color:white"><option value="unmobilized">Unmobilized</option><option value="mobilized">Mobilized (default)</option></select></label>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px"><label>Custom width (hexes)<input id="customWidth" type="number" min="12" max="200" value="0" style="display:block;width:100%" /></label><label>Custom height (hexes)<input id="customHeight" type="number" min="12" max="150" value="0" style="display:block;width:100%" /></label></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px"><label>Single-player nation<select id="playerSide" style="display:block;width:100%;padding:8px;background:#293d4b;color:white"><option value="Blue">Bluenstein (Blue)</option><option value="Red">Redonia (Red)</option></select></label><label>Map seed (click to copy)<input id="mapSeed" type="text" readonly title="Click to copy map seed" style="display:block;width:100%;padding:8px;background:#293d4b;color:#f3d78e;cursor:copy;border:1px solid #688293"/></label></div>
+        <fieldset style="border:1px solid #8ea5b5;padding:12px;margin:12px 0"><legend>Nation handicaps</legend>
+          <table style="width:100%;border-collapse:collapse;table-layout:fixed"><thead><tr><th style="text-align:left;width:46%">Setting</th><th style="text-align:left;width:27%">Bluenstein</th><th style="text-align:left;width:27%">Redonia</th></tr></thead><tbody>
+          <tr><td>Starting reinforcement (%)</td><td><input id="blueUnits" type="number" min="0" max="300" step="1" value="100" style="width:90%;box-sizing:border-box" /></td><td><input id="redUnits" type="number" min="0" max="300" step="1" value="100" style="width:90%;box-sizing:border-box" /></td></tr>
+          <tr><td>Starting RP balance</td><td><input id="blueRP" type="number" min="0" max="999999" value="0" style="width:90%;box-sizing:border-box" /></td><td><input id="redRP" type="number" min="0" max="999999" value="0" style="width:90%;box-sizing:border-box" /></td></tr>
+          <tr><td>Replacements per city hex/day</td><td><input id="blueReplacementRate" type="number" min="0" max="100" step="1" value="100" style="width:90%;box-sizing:border-box" /></td><td><input id="redReplacementRate" type="number" min="0" max="100" step="1" value="100" style="width:90%;box-sizing:border-box" /></td></tr>
+          </tbody></table></fieldset>
+        <p style="font-size:11px;color:#a8c2d3">Each eligible friendly city hex can generate up to the specified number of replacement soldiers per day (maximum 100).</p><p style="font-size:12px;color:#a8c2d3"><span id="forcePreview">Each side starts with 16 Infantry, 4 Motorized, 4 Mechanized, and 4 Armored divisions (28 total).</span></p>
+        <label style="display:block;margin:8px 0 12px">Unit counter style <select id="unitSymbolStyle" style="display:block;width:100%;padding:8px;background:#293d4b;color:white"><option value="nato">NATO symbols</option><option value="silhouettes">Illustrated silhouettes</option></select></label>
+        <div id="setupForceSummary"><strong>Starting forces</strong><table><thead><tr><th>Division type</th><th>Blue</th><th>Red</th></tr></thead><tbody id="setupForceRows"><tr><td>Infantry</td><td>16</td><td>16</td></tr><tr><td>Motorized</td><td>4</td><td>4</td></tr><tr><td>Mechanized</td><td>4</td><td>4</td></tr><tr><td>Armored</td><td>4</td><td>4</td></tr></tbody></table><p id="setupForceTotal">28 Blue / 28 Red</p></div><div id="densityFields" style="display:grid;grid-template-columns:1fr 1fr;gap:12px"></div>
+        <div style="display:flex;gap:10px;margin-top:18px"><button id="applyMapSetup" class="text-button" style="background:#2d644b;color:white">Start Game</button><button id="closeMapSetup" class="text-button">Return to the Game</button></div>
+        <p style="font-size:11px;margin:12px 0 0;color:#a8c2d3">Cities are balanced: each side gets one three-hex capital and identical numbers of other cities by size. Mountains, rough terrain, forests and swamps form scattered, mostly small clusters.</p>
+      </div>
+      <canvas id="battlefield" aria-label="Hex battlefield. Click a division to select it; drag to pan; use the mouse wheel to zoom."></canvas>
+      <div id="terrainLegend" class="terrain-legend" hidden><strong>Terrain identification</strong><div class="terrain-legend-items"><span><i style="background:#dcc870"></i>Clear</span><span><i style="background:#086027"></i>Forest</span><span><i style="background:#e79731"></i>Rough</span><span><i style="background:#c7d2e1"></i>Mountains</span><span><i style="background:#5b5f6d"></i>City</span><span><i style="background:#006fe5"></i>Lake</span><span><i style="background:#76498f"></i>Swamp</span><span><i style="background:#1a94dd"></i>River</span></div></div><div id="mapControlsOverlay" class="map-overlay controls-overlay" role="button" tabindex="0" aria-label="Map controls guide. Click anywhere on this guide to close." title="Click anywhere to close" hidden>
+        <div class="overlay-head"><strong>MAP CONTROLS</strong><span class="overlay-dismiss-hint">Click anywhere to close</span></div>
+        <div class="control-row"><kbd>Click</kbd><span>Select division</span></div>
+        <div class="control-row"><kbd>Right-click</kbd><span>Plot / extend route from route endpoint</span></div>
+        <div class="control-row"><kbd>Shift + Right-click</kbd><span>Toggle pause waypoint</span></div>
+        <div class="control-row"><kbd>Esc</kbd><span>Undo last route step</span></div>
+        <div class="control-row"><kbd>Drag</kbd><span>Pan map</span></div>
+        <div class="control-row"><kbd>Wheel / + / −</kbd><span>Zoom map</span></div>
+        <div class="control-row"><kbd>Hex Control</kbd><span>Map-wide control: Blue / Red / contested (both modes)</span></div><div class="control-row"><kbd>Show ZOCs</kbd><span>Toggle adjacent friendly / detected enemy control</span></div>
+        <div class="control-row"><kbd>Playtest Mode</kbd><span>Show and command both armies</span></div>
+        <div class="control-row"><kbd>Ready</kbd><span>Execute 12 hourly increments</span></div>
+      </div>
+      <div id="endDayOverlay" class="map-overlay day-overlay" hidden>
+        <div class="overlay-head"><strong id="dayReportTitle">END OF DAY REPORT</strong><span style="font-size:10px;color:#b9c8d6">Click report or map to close</span></div>
+        <div id="endDayBody"></div>
+      </div>
+      <div id="routeStatus" style="position:absolute;bottom:49px;left:16px;color:#fff;background:#152b36cc;padding:5px 9px;border-radius:5px;font-size:12px">Select a Blue division, or enable Playtest Mode to order both sides.</div>
+      <div class="map-hint"><span>Select a division · Right-click to plot · Shift+right-click to pause</span><span>Drag to pan</span><span>Wheel to zoom</span></div>
+    </section>
+    <aside class="sidebar">
+      <section class="panel" aria-label="Playtest side control" id="playtestSidePanel">
+        <div class="panel-heading"><h2>Playtest Side Control</h2></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;font-size:14px;padding:8px 0">
+          <label><input type="radio" name="playtestSide" value="Blue"> Blue</label>
+          <label><input type="radio" name="playtestSide" value="Red"> Red</label>
+          <label><input type="radio" name="playtestSide" value="Both"> Both</label>
+          <label><input type="radio" name="playtestSide" value="None" checked> None</label>
+        </div>
+        <div id="playtestSideDescription" style="font-size:12px;color:#b9d2e0">Normal single-player visibility</div>
+      </section>
+      <section class="panel" aria-label="Daily situation"><div class="panel-heading"><h2>Daily situation</h2><span class="live-tag">SUMMARY</span></div><div style="font-size:11px;color:#bdd0de;margin:5px 0">Divisions that fired during the executed turn · fixed-width text</div><button id="dsCopy" class="text-button" type="button">Copy DS</button> <button id="dsDownload" class="text-button" type="button">Save DS .txt</button><pre id="dsText" style="font:11px/1.5 Consolas,monospace;white-space:pre;overflow:auto;max-height:340px;user-select:text;margin:8px 0">Preparing DS…</pre><details><summary style="cursor:pointer">Detailed combat audit</summary><div id="combatLog" style="font:11px/1.5 Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere;max-height:250px;overflow:auto;user-select:text">No engagements yet.</div></details><button id="sidebarReportButton" class="text-button" style="margin-top:10px">View End of Day Report</button></section>
+      <section class="panel" id="selectionPanel">
+        <div id="noSelection" class="empty-state"><div class="empty-icon">⌖</div><strong>No division selected</strong><p>Click a Blue or Red counter on the map.</p></div>
+        <div id="divisionDetails" hidden>
+          <div class="division-title-row"><span id="sideBadge" class="side-badge blue-badge">BLUE</span><strong id="divisionName">1st Infantry</strong></div>
+          <div class="detail-row"><span>Strength</span><strong><span id="divisionStrength">10,000</span> soldiers</strong></div>
+          <div class="detail-row sensitive-stat"><span>Morale</span><strong id="divisionEffectiveness">—</strong></div><div class="detail-row sensitive-stat"><span>Experience</span><strong id="divisionExperience">—</strong></div><div class="detail-row"><span>Supply</span><strong id="divisionSupply">—</strong></div><div class="detail-row sensitive-stat"><span>Replacements on the way</span><strong id="divisionReplacements">—</strong></div><div class="detail-row"><span>Total casualties</span><strong id="divisionLosses">0</strong></div><div class="detail-row sensitive-stat"><span>Improved Position</span><strong id="divisionIP">0%</strong></div>
+          <div class="detail-row"><span>TIs remaining</span><strong id="divisionStartTIs">—</strong></div><div class="detail-row"><span>Projected after route</span><strong id="divisionRemainingTIs">—</strong></div><div class="detail-row"><span>Terrain</span><strong id="divisionTerrain">Plains</strong></div>
+        </div>
+      </section>
+      <section class="panel controls-panel"><div class="panel-heading"><h2>Controls</h2></div>
+        <div class="control-row"><kbd>Click</kbd><span>Select a division</span></div>
+        <div class="control-row"><kbd>Drag</kbd><span>Pan the battlefield</span></div>
+        <div class="control-row"><kbd>Wheel</kbd><span>Zoom in or out</span></div>
+        <div class="control-row"><kbd>Right-click</kbd><span>Extend route (Blue or Red in Playtest Mode)</span></div><div class="control-row"><kbd>Shift + Right-click</kbd><span>Pause waypoint on existing route</span></div><div class="control-row"><kbd>Esc</kbd><span>Remove last waypoint or route hex</span></div><div class="control-row"><kbd>Click empty</kbd><span>Clear selection</span></div>
+      </section>
+      <footer>ARMAGEDDON M4.99 · Offline build</footer>
+    </aside>
+  </main>
+<aside id="movementDebugPanel" style="display:none;position:fixed;right:12px;bottom:12px;z-index:99999;width:min(660px,90vw);height:300px;background:#101a24;color:#d7ecff;border:2px solid #7ea9cb;border-radius:8px;padding:10px;box-sizing:border-box;font:12px monospace"><div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><b>Movement execution diagnostics (latest 400 entries)</b><span><button id="debugCopy">Copy Log</button> <button id="debugClear">Clear</button> <button id="debugClose">Close</button></span></div><pre id="movementDebugText" style="height:240px;overflow:auto;white-space:pre-wrap;word-break:break-word;margin-top:8px"></pre></aside>
+  <div id="cityPanel" hidden role="dialog" aria-label="City management" style="position:fixed;z-index:9000;right:22px;top:85px;width:min(380px,calc(100vw - 44px));max-height:80vh;overflow:auto;background:#142635;color:#f2f6f8;border:2px solid #92a9bc;border-radius:10px;padding:18px;box-shadow:0 14px 42px #000b;font:15px system-ui,sans-serif">
+    <button id="cityClose" style="float:right;background:#40586c;color:white;border:0;border-radius:5px;padding:6px 11px;cursor:pointer">✕</button>
+    <h2 id="cityTitle" style="margin:0 0 12px;font-size:22px"></h2>
+    <div id="cityBody"></div>
+  </div>
+  <script>
+window.addEventListener('error',function(e){const el=document.getElementById('routeStatus');if(el)el.textContent='Game error: '+e.message;console.error('ARMAGEDDON initialization:',e.message);});
+window.addEventListener('unhandledrejection',function(e){const el=document.getElementById('routeStatus');if(el)el.textContent='Game error: '+String(e.reason);});
+</script>
+<script>
+document.getElementById('readyButton')?.addEventListener('click',function(){
+  if(!window.ARMAGEDDON_READY_BOUND){const el=document.getElementById('routeStatus');if(el)el.textContent='Ready unavailable: game initialization failed. Check the displayed Game error and reload.';window.alert('Ready unavailable: the game did not initialize. Check Game error on the screen.');}
+});
+</script><script src="src/march.js"></script>
+  <script>
+    if(new URLSearchParams(location.search).has("size")){
+      for(const name of ["game-data", "hex-map", "routes", "zoc", "movement", "combat", "sound", "supply", "city", "replacements", "app"]) document.write('<script src="src/'+name+'.js"><\/script>');
+    }
+  </script>
+  <script>
+  (function(){
+    const fields=document.getElementById('densityFields'),panel=document.getElementById('mapSetupPanel');
+    const names=[['cities','Cities'],['forest','Forests'],['hills','Rough'],['mountains','Mountains'],['swamp','Swamps'],['lakes','Lakes'],['rivers','Rivers'],['streams','Streams']];
+    for(const [key,label] of names){const wrapper=document.createElement('label');wrapper.style.cssText='display:flex;flex-direction:column;gap:4px;font-size:13px';wrapper.textContent=label;const sel=document.createElement('select');sel.dataset.density=key;sel.style.cssText='padding:7px;background:#293d4b;color:white;border:1px solid #688293;border-radius:4px';for(const [v,text] of (key==='cities'?[['low','Low'],['normal','Normal'],['high','High']]:[['off','None'],['low','Low'],['normal','Normal'],['high','High']])){const option=document.createElement('option');option.value=v;option.textContent=text;sel.appendChild(option);}sel.value=(window.ARMAGEDDON_DENSITY||{})[key]||'normal';wrapper.appendChild(sel);fields.appendChild(wrapper);}
+    document.getElementById('mapSize').value=window.ARMAGEDDON_SETUP?.size||'medium';
+    document.getElementById('deployment').value=window.ARMAGEDDON_SETUP?.deployment||'mobilized';
+    const seedControl=document.getElementById('mapSeed');
+    const existing=new URLSearchParams(location.search);
+    seedControl.value=existing.get('seed')||String(Math.floor(Math.random()*4294967295)).padStart(10,'0');
+    seedControl.addEventListener('click',async()=>{seedControl.select();try{await navigator.clipboard.writeText(seedControl.value);}catch(e){document.execCommand('copy');}seedControl.title='Copied: '+seedControl.value;});
+    for(const id of ['playerSide','blueUnits','redUnits','blueRP','redRP','blueReplacementRate','redReplacementRate']){if(existing.has(id))document.getElementById(id).value=existing.get(id);}
+    document.getElementById('unitSymbolStyle').value=existing.get('unitSymbolStyle')==='silhouettes'?'silhouettes':'nato';
+    const sizeControl=document.getElementById('mapSize'),preview=document.getElementById('forcePreview');
+    function updateForces(){
+      const scale={small:.5,medium:1,large:2,huge:3}[sizeControl.value]||1;
+      const types=[['Infantry',16],['Motorized',4],['Mechanized',4],['Armored',4]];
+      const counts={};
+      for(const side of ['Blue','Red']){
+        const pct=Math.max(0,Number(document.getElementById(side==='Blue'?'blueUnits':'redUnits').value)||0)/100;
+        counts[side]=types.map(([,base])=>Math.round(base*scale*pct));
+      }
+      const tbody=document.getElementById('setupForceRows');
+      if(tbody){tbody.replaceChildren();types.forEach(([type],i)=>{const tr=document.createElement('tr');for(const value of [type,counts.Blue[i],counts.Red[i]]){const td=document.createElement('td');td.textContent=String(value);tr.appendChild(td);}tbody.appendChild(tr);});}
+      const total=side=>counts[side].reduce((sum,n)=>sum+n,0);
+      const totalLabel=document.getElementById('setupForceTotal');
+      if(totalLabel)totalLabel.textContent=`${total('Blue')} Blue / ${total('Red')} Red`;
+      if(preview)preview.textContent=`Map ×${scale}; Bluenstein ${total('Blue')} divisions, Redonia ${total('Red')} divisions.`;
+    }
+    sizeControl.addEventListener('change',updateForces);for(const id of ['blueUnits','redUnits'])document.getElementById(id).addEventListener('input',updateForces);updateForces();
+    const stage=document.getElementById('storyStage'),card=document.getElementById('storyCard');
+    const editableIds=['mapSize','deployment','playerSide','blueUnits','redUnits','blueRP','redRP','blueReplacementRate','redReplacementRate','unitSymbolStyle'];
+    let previousSettings=null;
+    function openSetup(){
+      if(document.body.classList.contains('pre-game'))return;
+      previousSettings=new Map(editableIds.map(id=>[id,document.getElementById(id).value]));
+      stage.replaceChildren(panel,musicSwitch);stage.className='setup';stage.hidden=false;
+      card.hidden=true;panel.hidden=false;
+      for(const el of panel.querySelectorAll('input,select'))el.disabled=false;
+      panel.querySelector('h2').textContent='GAME SETUP — Start New Game';
+      panel.querySelector('p').textContent='Adjust starting forces, replacement rates, and map settings. Start New Game resets the current battlefield.';
+      document.getElementById('applyMapSetup').textContent='Start New Game';
+      document.getElementById('closeMapSetup').hidden=false;
+      document.getElementById('closeMapSetup').textContent='Return to the Game';
+      updateForces();
+    }
+    function closeSetup(restore=false){
+      if(restore&&previousSettings)for(const [id,value] of previousSettings)document.getElementById(id).value=value;
+      panel.hidden=true;stage.hidden=true;stage.className='';updateForces();
+    }
+    document.getElementById('mapSetupToggle').onclick=()=>{if(stage.hidden)openSetup();else closeSetup(true);};
+    document.getElementById('closeMapSetup').onclick=()=>{if(window.ARMAGEDDON_FIRST_SETUP)return;closeSetup(true);};
+    document.getElementById('applyMapSetup').onclick=()=>{
+      if(!window.ARMAGEDDON_FIRST_SETUP&&!confirm('Start a new game? Current unsaved progress and plotted orders will be lost.'))return;
+      window.ARMAGEDDON_MARCH?.stop();const params=new URLSearchParams();
+      params.set('size',document.getElementById('mapSize').value);
+      params.set('deployment',document.getElementById('deployment').value);
+      params.set('seed',seedControl.value);
+      // Every new campaign receives its own random historical starting date.
+      const first=Date.UTC(1939,0,1), last=Date.UTC(1947,11,31);
+      const day=86400000;
+      const offset=Math.floor(Math.random()*((last-first)/day+1));
+      params.set('startDate',new Date(first+offset*day).toISOString().slice(0,10));
+      for(const id of ['playerSide','blueUnits','redUnits','blueRP','redRP','blueReplacementRate','redReplacementRate'])params.set(id,document.getElementById(id).value);
+      params.set('unitSymbolStyle',document.getElementById('unitSymbolStyle').value);
+      for(const el of fields.querySelectorAll('select'))params.set(el.dataset.density,el.value);
+      window.location.search='?'+params.toString();
+    };
+
+    const loadButton=document.createElement('button');loadButton.type='button';loadButton.textContent='Load Saved Game';loadButton.className='text-button';loadButton.style.cssText='display:block;margin:12px auto;padding:11px 24px;background:#315d6c;color:white;border-radius:6px;cursor:pointer';
+    panel.appendChild(loadButton);
+    loadButton.onclick=()=>{let saved;try{saved=JSON.parse(localStorage.getItem('ARMAGEDDON_M3_SAVE'));}catch(e){}if(!saved||!saved.query){alert('No saved game found in this browser. Autosaves are created when a game starts and after each completed turn. If you opened a different extracted folder, the browser may use separate storage for that file.');return;}window.location.search=saved.query+(saved.query.includes('?')?'&':'?')+'loadSaved=1';};
+    // Music begins on the first user click (browser autoplay policy), continuing through setup.
+    const musicSwitch=document.createElement('button');musicSwitch.type='button';musicSwitch.textContent='♫ Music: ON';musicSwitch.style.cssText='position:fixed;top:12px;right:12px;z-index:9999;padding:9px 14px;border:1px solid #a4b4c5;border-radius:6px;background:#142636;color:#fff;cursor:pointer;font-weight:bold';
+    musicSwitch.addEventListener('click',e=>{e.stopPropagation();const m=window.ARMAGEDDON_MARCH;m.setEnabled(!m.enabled);musicSwitch.textContent=m.enabled?'♫ Music: ON':'♫ Music: OFF';});stage.appendChild(musicSwitch);
+    // Introduction, Bluenstein backstory, Redonia backstory, then centered setup.
+    const storyImages=['src/backstory.png','src/bluenstein_backstory.png','src/redonia_backstory.png'];
+    let page=0;window.ARMAGEDDON_FIRST_SETUP=true;
+    function showStory(){
+      stage.hidden=false;stage.className=page===1?'blue':page===2?'red':page===3?'setup':'';
+      if(page<3){stage.replaceChildren(card,musicSwitch);card.hidden=false;panel.hidden=true;
+        card.innerHTML=`<div class="story-art ${page===0?'intro':page===1?'blue':'red'}" style="aspect-ratio:${page===0?'476 / 512':'1672 / 941'};width:${page===0?'min(93vh,100vw)':'100vw'};height:${page===0?'auto':'100vh'}"><img src="${storyImages[page]}" alt="${['ARMAGEDDON introduction','Bluenstein backstory','Redonia backstory'][page]}"><span class="button-mask" aria-hidden="true"></span></div>`;
+        card.style.cssText='width:100%;height:100%;max-width:none;background:none;border:0;padding:0;box-shadow:none;display:flex;align-items:center;justify-content:center';
+      }else{card.hidden=true;card.style.display='none';stage.replaceChildren(panel,musicSwitch);panel.hidden=false;panel.style.margin='auto';document.getElementById('closeMapSetup').hidden=true;panel.querySelector('h2').textContent='GAME SETUP — Choose Your Battlefield';panel.querySelector('p').textContent='Choose map size, deployment, and terrain densities. Click Start Game to begin the game.';}
+    }
+    stage.addEventListener('click',e=>{if(page<3 && window.ARMAGEDDON_MARCH)window.ARMAGEDDON_MARCH.start();if(page<3 && e.target.closest('#storyCard')){page++;showStory();}});
+    panel.addEventListener('click',e=>e.stopPropagation());
+    window.ARMAGEDDON_SHOW_VICTORY=function(side){const file=side==='Blue'?'src/victory-blue.png':'src/victory-red(1).png';stage.hidden=false;stage.className=side==='Blue'?'blue':'red';panel.hidden=true;stage.appendChild(card);card.hidden=false;card.style.cssText='width:100%;height:100%;max-width:none;background:none;border:0;padding:0;box-shadow:none;display:flex;align-items:center;justify-content:center';card.innerHTML=`<img src="${file}" alt="${side==='Blue'?'Bluenstein':'Redonia'} victory" style="max-width:100%;max-height:100%;object-fit:contain">`;page=4;};
+    if(new URLSearchParams(location.search).has('size')){stage.hidden=true;window.ARMAGEDDON_FIRST_SETUP=false;document.getElementById('closeMapSetup').hidden=false;}else showStory();
+
+  })();
+  </script>
+<style>#handoffScreen[hidden]{display:none!important}#storyStage.setup #mapSetupPanel fieldset{min-width:0}#storyStage.setup #mapSetupPanel{font-size:14px}#mapSetupPanel{max-height:calc(100vh - 24px)!important}#mapSetupPanel button{max-width:100%}</style><script>
+(function(){
+ const types=[['Infantry',16],['Motorized',4],['Mechanized',4],['Armored',4]];
+ function refresh(){const b=Number(document.getElementById('blueUnits')?.value||100)/100,r=Number(document.getElementById('redUnits')?.value||100)/100;
+ const rows=document.getElementById('setupForceRows');if(!rows)return;
+ rows.innerHTML=types.map(([name,n])=>`<tr><td>${name}</td><td>${Math.round(n*b)}</td><td>${Math.round(n*r)}</td></tr>`).join('');
+ document.getElementById('setupForceTotal').textContent=`${types.reduce((t,[,n])=>t+Math.round(n*b),0)} Blue / ${types.reduce((t,[,n])=>t+Math.round(n*r),0)} Red`;
+ }
+ document.addEventListener('change',e=>{if(e.target?.id==='blueUnits'||e.target?.id==='redUnits')refresh()});document.addEventListener('DOMContentLoaded',refresh);
+})();
+</script><style>
+/* M4.22: full-width, scrollable, three-column setup */
+#storyStage.setup #mapSetupPanel{width:min(1540px,98vw)!important;max-width:none!important;max-height:calc(100vh - 16px)!important;overflow-y:auto!important;padding:20px 24px!important}
+#storyStage.setup #mapSetupPanel #densityFields{grid-template-columns:repeat(3,minmax(0,1fr))!important} #setupForceSummary{margin:12px 0} #storyStage.setup #mapSetupPanel{column-count:1}
+#storyStage.setup #mapSetupPanel input,#storyStage.setup #mapSetupPanel select{min-width:0;max-width:100%;box-sizing:border-box}
+#setupForceSummary{border:1px solid #4c6578;border-radius:8px;padding:12px;background:#213645}
+#setupForceSummary table{width:100%;border-collapse:collapse;text-align:center;font-size:12px}
+#setupForceSummary th,#setupForceSummary td{padding:5px;border-bottom:1px solid #456075}
+@media(max-width:700px){#storyStage.setup #mapSetupPanel #densityFields{grid-template-columns:1fr 1fr!important}}
+
+/* Compact three-column setup: left and middle take 25% each, third holds force summary and terrain */
+@media(min-width:1000px){#storyStage.setup #mapSetupPanel{width:min(1500px,99vw)!important}#storyStage.setup #mapSetupPanel #densityFields{grid-template-columns:repeat(3,minmax(0,1fr))!important}}
+</style>
+<script>
+/* M4.25 setup: two compact 25% settings columns and a 50% summary/terrain column. */
+(function(){
+ function layoutSetup(){
+  const panel=document.getElementById('mapSetupPanel');
+  if(!panel||panel.querySelector('#setupThreeColumns'))return;
+  const field=id=>document.getElementById(id)?.closest('label');
+  const row=id=>field(id)?.parentElement;
+  const originalRows=['mapSize','customWidth','playerSide','blueUnits','blueReplacementRate'].map(row);
+  const handicapRow=row('blueUnits');
+  const left=document.createElement('div'),middle=document.createElement('div'),right=document.createElement('div');
+  left.className='setup-quarter';middle.className='setup-quarter';right.className='setup-half';
+  const grid=document.createElement('div');grid.id='setupThreeColumns';
+  const put=(target,node)=>{if(node){target.appendChild(node);}};
+  ['mapSize','customWidth','playerSide'].forEach(id=>put(left,field(id)));
+
+
+
+  ['deployment','unitSymbolStyle','customHeight','mapSeed'].forEach(id=>put(middle,field(id)));
+  // Preserve the original handicap fieldset and its six live input elements.
+  // Earlier builds created a second empty table and deleted the original inputs.
+  const handicap=document.getElementById('blueUnits')?.closest('fieldset');
+  if(handicap){handicap.id='combinedHandicap';}
+  /* Keep combined handicap outside the two settings columns. */
+
+  const lower=document.createElement('div');lower.id='setupLower';
+  const forces=document.getElementById('setupForceSummary');
+  const densities=document.getElementById('densityFields');
+  put(lower,forces);put(lower,densities);
+  const actions=document.getElementById('applyMapSetup')?.parentElement;
+  if(actions)lower.after(actions);
+  for(const node of [...panel.children]){
+    if(node.tagName==='P' && (node.textContent.includes('Replacement rates')||node.textContent.startsWith('Cities are balanced')))node.remove();
+  }
+  for(const old of originalRows)if(old&&old.parentElement===panel&&old.children.length===0)old.remove();
+  const anchor=panel.querySelector('h2')?.nextElementSibling;
+  if(anchor)anchor.after(grid);else panel.prepend(grid);
+  grid.append(left,middle,right);
+  if(handicap)grid.appendChild(handicap);
+  grid.after(lower);
+  if(actions){actions.style.display="flex";actions.style.justifyContent="flex-start";actions.style.gap="10px";actions.style.marginTop="14px";lower.after(actions);}
+ }
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',layoutSetup);else layoutSetup();
+})();
+</script>
+<style>
+#storyStage.setup #mapSetupPanel{width:min(1600px,98vw)!important;overflow-x:hidden!important}
+#setupThreeColumns{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,2fr);gap:16px;align-items:start}
+#setupThreeColumns .setup-quarter,#setupThreeColumns .setup-half{display:flex;flex-direction:column;gap:12px;min-width:0}
+#setupThreeColumns label{display:block!important;margin:0!important;min-width:0;font-size:13px}
+#setupThreeColumns input,#setupThreeColumns select{display:block;width:100%!important;box-sizing:border-box;min-width:0}
+#setupThreeColumns fieldset{margin:0;min-width:0}
+#setupThreeColumns #densityFields{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:12px!important}
+#setupThreeColumns #setupForceSummary{margin:0;width:100%;box-sizing:border-box}
+#setupThreeColumns #setupForceSummary table{width:100%;table-layout:fixed;font-size:12px}
+#setupThreeColumns #setupForceSummary th,#setupThreeColumns #setupForceSummary td{padding:5px 3px;text-align:center}
+#setupThreeColumns #setupForceSummary th:first-child,#setupThreeColumns #setupForceSummary td:first-child{text-align:left;width:48%}
+#setupThreeColumns .setup-half>p{margin:0;font-size:11px}
+@media(max-width:900px){#setupThreeColumns{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}#setupThreeColumns .setup-half{grid-column:1/-1}}
+@media(max-width:520px){#setupThreeColumns{grid-template-columns:1fr}#setupThreeColumns .setup-half{grid-column:auto}#setupThreeColumns #densityFields{grid-template-columns:repeat(2,minmax(0,1fr))!important}}
+/* M4.27: requested compact 25% + 25% settings, lower forces and vertical terrain */
+#setupThreeColumns{grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important}
+#setupThreeColumns .setup-half{display:none!important}
+#setupThreeColumns #unitSymbolStyle{width:60%!important;max-width:230px!important}
+#setupThreeColumns label:has(> #unitSymbolStyle){width:60%!important;max-width:230px!important}
+#setupLower{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(0,1fr);gap:16px;align-items:start;margin-top:16px;max-width:100%}
+#setupLower #setupForceSummary{width:100%;margin:0!important}
+#setupLower #setupForceSummary table{text-align:left!important;table-layout:fixed;width:100%}
+#setupLower #setupForceSummary th,#setupLower #setupForceSummary td{text-align:left!important;padding:5px 8px!important}
+#setupLower #densityFields{display:grid!important;grid-template-columns:1fr!important;gap:8px!important}
+#setupLower #densityFields label{display:block;width:100%;font-size:13px}
+#setupLower #densityFields select{display:block;width:100%;box-sizing:border-box}
+@media(max-width:950px){#setupLower{max-width:100%;grid-template-columns:1fr 1fr}}
+@media(max-width:600px){#setupThreeColumns{grid-template-columns:1fr!important}#setupLower{grid-template-columns:1fr!important}}
+</style>
+<style>
+/* M4.28: halve setup width; compact two setting columns, forces and one-column terrain. */
+#storyStage.setup #mapSetupPanel{width:min(800px,96vw)!important;max-width:800px!important;padding:18px!important}
+#setupThreeColumns{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:12px!important}
+#setupThreeColumns .setup-half{display:none!important}
+#setupLower{grid-template-columns:minmax(0,1.4fr) minmax(0,1fr)!important;max-width:100%!important;gap:12px!important}
+#setupLower #densityFields{display:grid!important;grid-template-columns:1fr!important;gap:6px!important}
+#setupLower #densityFields label{width:100%!important}
+#setupLower #densityFields select{width:100%!important}
+#setupForceSummary table{table-layout:auto!important}
+#setupForceSummary th,#setupForceSummary td{text-align:left!important}
+#mapSetupPanel #applyMapSetup{min-width:100px}
+@media(max-width:600px){#setupThreeColumns,#setupLower{grid-template-columns:1fr!important}}
+/* M4.29: put numeric/text input boxes beside their captions, not beneath. */
+#setupThreeColumns label:has(> input){display:grid!important;grid-template-columns:minmax(0,1fr) 104px;align-items:center;column-gap:8px;min-height:28px}
+#setupThreeColumns label:has(> input) > input{width:104px!important;min-width:0!important;justify-self:end;padding:4px 6px!important;height:26px!important}
+#setupThreeColumns fieldset label:has(> input){grid-template-columns:minmax(0,1fr) 104px}
+@media(max-width:520px){#setupThreeColumns label:has(> input){grid-template-columns:minmax(0,1fr) 96px}#setupThreeColumns label:has(> input)>input{width:96px!important}}
+</style>
+<script>
+(function(){
+ function alignSetupButtons(){
+  const start=document.getElementById('applyMapSetup');
+  const panel=document.getElementById('mapSetupPanel');
+  if(!start||!panel)return;
+  const actions=start.parentElement;
+  const load=[...panel.querySelectorAll('button')].find(b=>b.textContent.trim()==='Load Saved Game');
+  if(load){actions.appendChild(load);load.style.cssText='display:inline-block;margin:0;padding:8px 15px;background:#315d6c;color:white;border-radius:6px;cursor:pointer';}
+  actions.style.cssText='display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:14px';
+ }
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(alignSetupButtons,0));else setTimeout(alignSetupButtons,0);
+})();
+</script>
+
+<!-- M4.30: compact setup control alignment -->
+<style>
+/* Place handicap starting-unit selections alongside their captions. */
+#setupThreeColumns fieldset label:has(> #blueUnits),
+#setupThreeColumns fieldset label:has(> #redUnits){
+ display:grid!important;grid-template-columns:minmax(0,1fr) 104px!important;
+ align-items:center!important;gap:8px!important;min-height:28px!important;
+}
+#setupThreeColumns fieldset label:has(> #blueUnits)>select,
+#setupThreeColumns fieldset label:has(> #redUnits)>select{
+ width:104px!important;min-width:0!important;height:26px!important;
+ padding:2px 3px!important;justify-self:end!important;
+}
+/* Same caption/input alignment for RP and replacement rates on both sides. */
+#setupThreeColumns label:has(> #blueRP),
+#setupThreeColumns label:has(> #redRP),
+#setupThreeColumns label:has(> #blueReplacementRate),
+#setupThreeColumns label:has(> #redReplacementRate){
+ grid-template-columns:minmax(0,1fr) 104px!important;
+}
+@media(max-width:520px){
+ #setupThreeColumns fieldset label:has(> #blueUnits),
+ #setupThreeColumns fieldset label:has(> #redUnits){grid-template-columns:minmax(0,1fr) 96px!important}
+ #setupThreeColumns fieldset label:has(> #blueUnits)>select,
+ #setupThreeColumns fieldset label:has(> #redUnits)>select{width:96px!important}
+}
+</style>
+<script>
+(function(){
+ function finishSetupLayout(){
+  const width=document.getElementById('customWidth')?.closest('label');
+  const height=document.getElementById('customHeight')?.closest('label');
+  if(width&&height&&width.parentElement&&height.previousElementSibling!==width){
+    width.insertAdjacentElement('afterend',height);
+  }
+ }
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',finishSetupLayout);
+ else finishSetupLayout();
+})();
+</script>
+
+<!-- M4.31: handicap alignment and stronger action buttons -->
+<style>
+#setupThreeColumns .setup-quarter{gap:12px!important}
+#setupThreeColumns fieldset{display:flex;flex-direction:column;gap:5px;min-height:136px;box-sizing:border-box}
+#setupThreeColumns fieldset label{display:grid!important;grid-template-columns:minmax(0,1fr) 104px!important;align-items:center!important;gap:8px!important;min-height:28px!important}
+#setupThreeColumns fieldset label>input,#setupThreeColumns fieldset label>select{width:104px!important;justify-self:end!important}
+#mapSetupPanel #applyMapSetup{background:#19a64e!important;color:#fff!important;font-weight:700!important}
+#mapSetupPanel button[data-load-game]{background:#ec7a21!important;color:#fff!important;font-weight:700!important}
+</style>
+<script>
+(function(){
+ function adjust(){
+  const blue=document.getElementById('blueUnits')?.closest('fieldset');
+  const red=document.getElementById('redUnits')?.closest('fieldset');
+  const blueRate=document.getElementById('blueReplacementRate')?.closest('label');
+  const redRate=document.getElementById('redReplacementRate')?.closest('label');
+  if(blue&&blueRate)blue.appendChild(blueRate);
+  if(red&&redRate)red.appendChild(redRate);
+  // Position both handicap groups on matching rows, after the first three setup controls.
+  const left=blue?.parentElement,right=red?.parentElement;
+  if(left&&right){
+    const blueNation=document.getElementById('playerSide')?.closest('label');
+    const seed=document.getElementById('mapSeed')?.closest('label');
+    if(blueNation)blueNation.insertAdjacentElement('afterend',blue);
+    if(seed)seed.insertAdjacentElement('afterend',red);
+  }
+  const panel=document.getElementById('mapSetupPanel');
+  for(const b of panel?.querySelectorAll('button')||[]){if(b.textContent.trim()==='Load Saved Game')b.dataset.loadGame='1';}
+ }
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(adjust,0));else setTimeout(adjust,0);
+})();
+</script>
+<style>
+.topbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;min-height:70px;padding:8px 12px}
+#headerActions{display:flex;align-items:center;gap:7px;flex-wrap:wrap;flex:1;justify-content:center}
+#headerActions .text-button{white-space:nowrap}
+.map-toolbar{display:none!important;height:0!important;min-height:0!important;flex-basis:0!important;padding:0!important;border:0!important}.map-shell{min-height:0}
+</style>
+<script>
+document.addEventListener('DOMContentLoaded',function(){
+ const header=document.querySelector('.topbar'),phase=document.getElementById('phaseLabel');
+ if(!header)return;
+ const actions=document.createElement('div');actions.id='headerActions';header.insertBefore(actions,phase);
+ for(const id of ['soundToggle','gameClock','tiLabel','replayTurnButton','saveGameButton','gameSpeedWrap','readyButton','dayReportButton','mapSetupToggle']){
+  const button=document.getElementById(id);if(button)actions.appendChild(button);
+ }
+ // Overlay menu uses the existing overlay toggle buttons so keyboard shortcuts
+ // and all current overlay behavior remain authoritative.
+ const overlayMenu=document.createElement('div');
+ overlayMenu.id='overlaysMenu';
+ overlayMenu.className='overlays-menu';
+ const overlayTrigger=document.createElement('button');
+ overlayTrigger.id='overlaysDropdown';
+ overlayTrigger.className='text-button';
+ overlayTrigger.type='button';
+ overlayTrigger.setAttribute('aria-haspopup','true');
+ overlayTrigger.setAttribute('aria-expanded','false');
+ overlayTrigger.textContent='Overlays ▾';
+ const overlayList=document.createElement('div');
+ overlayList.className='overlays-list';
+ overlayList.hidden=true;
+ const entries=[
+  ['unitSymbolsToggle','NATO / Silhouettes','U'],
+  ['replacementToggle','Replacements','R'],
+  ['endPositionsToggle','End Positions','E'],
+  ['zocToggle','Zones of Control','Z'],
+  ['citiesOverlayToggle','Cities','C'],
+  ['hexControlToggle','Hex Control','H'],
+  ['mapControlsToggle','Map Controls','M']
+ ];
+ const updateLabels=()=>{
+  for(const [id,label,key] of entries){
+   const source=document.getElementById(id);
+   const item=overlayList.querySelector('[data-overlay-id="'+id+'"]');
+   if(!source||!item)continue;
+   const pressed=source.getAttribute('aria-pressed')==='true';
+   if(id==='unitSymbolsToggle'){item.textContent='Unit symbols: '+(pressed?'Silhouettes':'NATO')+' (U)';item.setAttribute('aria-checked',String(pressed));continue;}
+   const visible=id==='mapControlsToggle'?!document.getElementById('mapControlsOverlay')?.hidden:pressed;
+   item.textContent=(visible?'☑ ':'☐ ')+label+' ('+key+')';
+   item.setAttribute('aria-checked',String(visible));
+  }
+ };
+ for(const [id,label,key] of entries){
+  const item=document.createElement('button');
+  item.type='button';item.className='overlays-option';item.dataset.overlayId=id;
+  item.setAttribute('role','menuitemcheckbox');
+  item.addEventListener('click',()=>{
+   document.getElementById(id)?.click();
+   updateLabels();
+  });
+  overlayList.appendChild(item);
+  document.getElementById(id)?.addEventListener('click',()=>setTimeout(updateLabels,0));
+ }
+ overlayMenu.append(overlayTrigger,overlayList);
+ const dayReport=document.getElementById('dayReportButton');
+ if(dayReport)actions.insertBefore(overlayMenu,dayReport);else actions.appendChild(overlayMenu);
+ function closeOverlaysMenu(){overlayList.hidden=true;overlayTrigger.setAttribute('aria-expanded','false');}
+ overlayTrigger.addEventListener('click',()=>{
+  const opening=overlayList.hidden;
+  overlayList.hidden=!opening;
+  overlayTrigger.setAttribute('aria-expanded',String(opening));
+  if(opening)updateLabels();
+ });
+ document.addEventListener('click',e=>{if(!overlayMenu.contains(e.target))closeOverlaysMenu();});
+ document.addEventListener('keydown',e=>{if(e.key==='Escape')closeOverlaysMenu();});
+ updateLabels();
+ const deploy=document.getElementById('deployReinforcement');if(deploy){deploy.style.display='none';deploy.title='Deploy reinforcements (D)';}
+ for(const id of ['unitSymbolsToggle','replacementToggle','endPositionsToggle','zocToggle','citiesOverlayToggle','hexControlToggle','mapControlsToggle']){
+  const button=document.getElementById(id);if(button)button.style.display='none';
+ }
+});
+</script>
+<style>
+.overlays-menu{position:relative;display:inline-flex;align-items:center;z-index:150}
+.overlays-list{position:absolute;top:calc(100% + 5px);left:0;min-width:210px;background:#172634;border:1px solid #8199aa;border-radius:7px;box-shadow:0 10px 24px #0009;padding:5px;display:flex;flex-direction:column;gap:2px}
+.overlays-list[hidden]{display:none!important}
+.overlays-option{font:inherit;font-size:12px;text-align:left;padding:9px 10px;border:0;border-radius:4px;color:#eaf4ff;background:transparent;cursor:pointer;white-space:nowrap}
+.overlays-option:hover,.overlays-option:focus-visible{background:#345368;outline:none}
+</style>
+</body>
+</html>
+
+<style>
+/* M4.90: align handicap boxes while counter style sits below Deployment. */
+@media(min-width:601px){#setupThreeColumns .setup-quarter:nth-child(2) > fieldset{margin-top:0!important}}
+</style>
+<script>
+(function(){
+ function alignHandicaps(){
+  const blue=document.getElementById('blueUnits')?.closest('fieldset');
+  const red=document.getElementById('redUnits')?.closest('fieldset');
+  if(!blue||!red)return;
+  red.style.marginTop='0px';blue.style.marginTop='0px';
+  const diff=blue.getBoundingClientRect().top-red.getBoundingClientRect().top;
+  if(diff>1)red.style.marginTop=diff+'px';
+  else if(diff< -1)blue.style.marginTop=(-diff)+'px';
+ }
+ window.addEventListener('load',()=>{setTimeout(alignHandicaps,150);setTimeout(alignHandicaps,450);setTimeout(alignHandicaps,900)});
+ window.addEventListener('resize',()=>setTimeout(alignHandicaps,80));
+})();
+</script>
+
+<style>
+#gameSpeedMenu label{display:inline-flex;align-items:center;gap:3px;cursor:pointer}
+#gameSpeedMenu input{accent-color:#66c4ed;margin:0}
+#setupThreeColumns fieldset:has(#blueUnits),#setupThreeColumns fieldset:has(#redUnits){box-sizing:border-box;min-height:128px}
+</style>
+
+<style>
+#combinedHandicap{width:100%;box-sizing:border-box;margin-top:6px!important}#combinedHandicap table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:12px}#combinedHandicap th,#combinedHandicap td{padding:6px 4px;text-align:left;border-bottom:1px solid #455d6e}#combinedHandicap select,#combinedHandicap input{width:100%!important;min-width:0;font-size:12px}#combinedHandicap th:first-child{width:37%}#setupThreeColumns .setup-quarter:has(#combinedHandicap){grid-column:1/-1}#setupThreeColumns{grid-template-columns:1fr 1fr!important}
+</style>
+
+<!-- M4.93: restore all original setup controls above the combined handicap table. -->
+<style>
+#setupThreeColumns.m493-restored{display:grid!important;grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important;gap:12px!important;align-items:start}
+#setupThreeColumns.m493-restored .m493-column{display:flex!important;flex-direction:column;gap:12px;min-width:0}
+#setupThreeColumns.m493-restored .m493-column>label{display:block!important;width:100%!important;max-width:none!important;font-size:13px}
+#setupThreeColumns.m493-restored .m493-column>label>select{display:block!important;width:100%!important;max-width:none!important;margin-top:4px;padding:8px!important}
+#setupThreeColumns.m493-restored .m493-column>label:has(input){display:grid!important;grid-template-columns:minmax(0,1fr) 104px!important;align-items:center;min-height:28px}
+#setupThreeColumns.m493-restored .m493-column>label>input{width:104px!important;max-width:104px!important;justify-self:end}
+#setupThreeColumns.m493-restored #combinedHandicap{grid-column:1/-1!important;min-height:0!important;width:100%;margin-top:4px!important}
+#setupThreeColumns.m493-restored #combinedHandicap table{width:100%;table-layout:fixed}
+#setupThreeColumns.m493-restored #combinedHandicap td,#setupThreeColumns.m493-restored #combinedHandicap th{padding:7px}
+#combinedHandicap td label{font-size:0!important;display:block!important;margin:0!important}#combinedHandicap td input{font-size:14px!important;display:block!important;width:100%!important;box-sizing:border-box;padding:7px 8px!important;background:#fff;color:#111;border:1px solid #8ca4b3;border-radius:3px}#combinedHandicap th:first-child{width:43%}#combinedHandicap td{width:28.5%}
+#setupThreeColumns.m493-restored #combinedHandicap select,#setupThreeColumns.m493-restored #combinedHandicap input{width:100%!important;max-width:100%!important}
+@media(max-width:600px){#setupThreeColumns.m493-restored{grid-template-columns:1fr!important}#setupThreeColumns.m493-restored #combinedHandicap{grid-column:1!important}}
+</style>
+<script>
+(function(){
+ function restore(){
+  const grid=document.getElementById('setupThreeColumns');
+  if(!grid||grid.classList.contains('m493-restored'))return;
+  const label=id=>document.getElementById(id)?.closest('label');
+  const left=document.createElement('div'),right=document.createElement('div');
+  left.className='m493-column';right.className='m493-column';
+  for(const id of ['mapSize','customWidth','playerSide']){const n=label(id);if(n)left.appendChild(n);}
+  for(const id of ['deployment','unitSymbolStyle','customHeight','mapSeed']){const n=label(id);if(n)right.appendChild(n);}
+  let handicap=document.getElementById('combinedHandicap');
+  if(!handicap){
+   handicap=document.createElement('fieldset');handicap.id='combinedHandicap';
+   handicap.innerHTML='<legend>Nation handicaps</legend><table><thead><tr><th>Setting</th><th>Bluenstein</th><th>Redonia</th></tr></thead><tbody><tr><th>Starting reinforcement (%)</th><td id="blueUnitsCell"></td><td id="redUnitsCell"></td></tr><tr><th>Starting RP balance</th><td id="blueRPCell"></td><td id="redRPCell"></td></tr><tr><th>Replacements per city hex/day</th><td id="blueReplacementRateCell"></td><td id="redReplacementRateCell"></td></tr></tbody></table>';
+  }
+  for(const id of ['blueUnits','redUnits','blueRP','redRP','blueReplacementRate','redReplacementRate']){
+   const el=document.getElementById(id),cell=handicap.querySelector('#'+id+'Cell');
+   if(el&&cell){const lab=el.closest('label');cell.appendChild(lab||el);}
+  }
+  grid.replaceChildren(left,right,handicap);
+  grid.classList.add('m493-restored');
+ }
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(restore,100));
+ else setTimeout(restore,100);
+})();
+</script>
+
+<style>#tiLabel{display:none!important}#retreatSoundTest,#surrenderSoundTest{display:none!important}</style>
