@@ -19,7 +19,7 @@
   function offsetFromAxial(q,r){return {col:q+Math.floor(r/2),row:r};}
   function terrainStyle(name){return ({Plains:{fill:"#778e63",detail:"#91a777"},Forest:{fill:"#496c4c",detail:"#67865b"},Hills:{fill:"#938765",detail:"#b3a47c"},River:{fill:"#507e91",detail:"#7db0c0"}})[name]||{fill:"#778e63",detail:"#91a777"};}
   class HexMapRenderer{
-    constructor(canvas,scenario,terrainAt){this.canvas=canvas;this.ctx=canvas.getContext('2d');this.scenario=scenario;this.terrainAt=terrainAt;this.baseSize=35;this.zoom=1;this.pan={x:0,y:0};this.selectedId=null;this.unitSymbolStyle='nato';this.unitArt={};for(const side of ['blue','red'])for(const type of ['infantry','motorized','mechanized','armored']){const key=side+'_'+type,img=new Image();img.onload=()=>this.render();img.src='src/unit_'+key+'.png';this.unitArt[key]=img;}this.hoverCell=null;this.routes=null;this.showZoc=false;this.showControl=false;this.showCities=false;this.cityStates=null;this.showTerrainTypes=false;this.showWaterCrossings=false;this.playtest=false;this.visualPositions=new Map();this.satelliteLayer=null;this.cityTexture=null;this.forestTexture=null;this.lakeTexture=null;this.extraTextures={};this.hillHexes=[];this.approvedTerrain={};for(const name of ['rough','swamp','mountains','forest','city']){const image=new Image();image.onload=()=>{this.satelliteLayer=null;this.render();};image.src='src/'+name+'_approved.jpg';this.approvedTerrain[name]=image;}
+    constructor(canvas,scenario,terrainAt){this.canvas=canvas;this.ctx=canvas.getContext('2d');this.scenario=scenario;this.terrainAt=terrainAt;this.baseSize=35;this.zoom=1;this.pan={x:0,y:0};this.selectedId=null;this.unitSymbolStyle='nato';this.unitArt={};for(const side of ['blue','red'])for(const type of ['infantry','motorized','mechanized','armored']){const key=side+'_'+type,img=new Image();img.onload=()=>this.render();img.src='src/unit_'+key+'.png';this.unitArt[key]=img;}this.hoverCell=null;this.routes=null;this.showZoc=false;this.showControl=false;this.showCities=false;this.showSupply=false;this.cityStates=null;this.showTerrainTypes=false;this.showWaterCrossings=false;this.playtest=false;this.visualPositions=new Map();this.satelliteLayer=null;this.cityTexture=null;this.forestTexture=null;this.lakeTexture=null;this.extraTextures={};this.hillHexes=[];this.approvedTerrain={};for(const name of ['rough','swamp','mountains','forest','city']){const image=new Image();image.onload=()=>{this.satelliteLayer=null;this.render();};image.src='src/'+name+'_approved.jpg';this.approvedTerrain[name]=image;}
       const cityImage=new Image();cityImage.onload=()=>{this.cityTexture=cityImage;this.satelliteLayer=null;this.render();};
       cityImage.src='src/city_texture.png';
       const forestImage=new Image();forestImage.onload=()=>{this.forestTexture=forestImage;this.satelliteLayer=null;this.render();};
@@ -55,7 +55,7 @@
     screenToWorld(x,y){return {x:(x-this.pan.x)/this.size,y:(y-this.pan.y)/this.size};}
     hitTest(x,y){const w=this.screenToWorld(x,y),a=pixelToAxial(w.x,w.y,1),o=offsetFromAxial(a.q,a.r);if(o.col<0||o.row<0||o.col>=this.scenario.cols||o.row>=this.scenario.rows)return null;return o;}
     screenPointToHex(x,y){const w=this.screenToWorld(x,y),a=pixelToAxial(w.x,w.y,1),o=offsetFromAxial(a.q,a.r);return o.col>=0&&o.row>=0&&o.col<this.scenario.cols&&o.row<this.scenario.rows?o:null;}
-    zoomAt(factor,x,y){const old=this.zoom,next=Math.max(.55,Math.min(1.8,old*factor));if(next===old)return;const worldX=(x-this.pan.x)/old,worldY=(y-this.pan.y)/old;this.zoom=next;this.pan.x=x-worldX*next;this.pan.y=y-worldY*next;this.clampPan();this.render();}
+    zoomAt(factor,x,y){const old=this.zoom,next=Math.max(.30,Math.min(1.8,old*factor));if(next===old)return;const worldX=(x-this.pan.x)/old,worldY=(y-this.pan.y)/old;this.zoom=next;this.pan.x=x-worldX*next;this.pan.y=y-worldY*next;this.clampPan();this.render();}
     setSelection(id){this.selectedId=id;this.render();}
     // M4.19: three-hex elevation-aware line of sight. Adjacent enemies are always spotted.
     // Cube-coordinate interpolation samples all intervening hexes, including hex-edge
@@ -93,25 +93,38 @@
       }
       return true;
     }
-    // M5.18: terrain concealment fog of war. Adjacent observers always spot.
-    // Forest, swamp, mountain and city units require an adjacent friendly unit;
-    // all other terrain allows spotting within three hexes.
+    // M5.22: normal single-player (None) always uses the player's intelligence.
+    // All counter drawing, hit-testing and detail panels share this predicate.
     spottingDistance(a,b){
-      const x=global.ARMAGEDDON_HEX.axialFromOffset(a.col,a.row);
-      const y=global.ARMAGEDDON_HEX.axialFromOffset(b.col,b.row);
-      return Math.max(Math.abs(x.q-y.q),Math.abs(x.r-y.r),Math.abs((x.q+x.r)-(y.q+y.r)));
+      const x=axialFromOffset(a.col,a.row),y=axialFromOffset(b.col,b.row);
+      const dq=x.q-y.q,dr=x.r-y.r;
+      return Math.max(Math.abs(dq),Math.abs(dr),Math.abs(dq+dr));
     }
-    visibleDivision(d){
-      if(!d||d.destroyed||d.strength<=0)return false;
-      const mode=window.ARMAGEDDON_VIEW_MODE;
-      if(mode==='Both')return true; // Explicit playtest omniscience.
-      const side=mode==='Red'||mode==='Blue'?mode:(window.ARMAGEDDON_PLAYER_SIDE||'Blue');
-      if(d.side===side)return true;
-      const terrain=String(this.terrainAt(d.col,d.row)||'').toLowerCase();
-      const concealed=['forest','wood','swamp','mountain','city'].some(t=>terrain.includes(t));
-      const radius=concealed?1:3;
-      return this.scenario.divisions.some(f=>f.side===side&&!f.destroyed&&f.strength>0&&this.spottingDistance(f,d)<=radius);
+    spottingTerrain(d){
+      return String(this.terrainAt(d.col,d.row)||'').trim().toLowerCase();
     }
+    visibilityInfo(d){
+      if(!d||d.destroyed||d.strength<=0)return {visible:false,reason:'inactive'};
+      const mode=window.ARMAGEDDON_VIEW_MODE||'None';
+      if(mode==='Both')return {visible:true,reason:'both-playtest'};
+      const side=mode==='Red'?'Red':mode==='Blue'?'Blue':(window.ARMAGEDDON_SETUP?.playerSide||'Blue');
+      if(d.side===side)return {visible:true,reason:'friendly',side};
+      const terrain=this.spottingTerrain(d);
+      // Actual urban terrain is authoritative; also check the city's explicit
+      // footprint if provided by the city controller (not just the city label).
+      const urban=terrain==='urban'||terrain==='city'||Boolean(this.cityForHex?.(d.col,d.row));
+      const concealed=urban||/forest|wood|swamp|mountain/.test(terrain);
+      const maxRange=concealed?1:3;
+      let nearest=Infinity;
+      for(const f of this.scenario.divisions){
+        if(f.side!==side||f.destroyed||f.strength<=0)continue;
+        const distance=this.spottingDistance(f,d);
+        nearest=Math.min(nearest,distance);
+        if(distance<=maxRange)return {visible:true,reason:'spotted',terrain,urban,maxRange,nearest:distance,side};
+      }
+      return {visible:false,reason:'out-of-range',terrain,urban,maxRange,nearest,side};
+    }
+    visibleDivision(d){return this.visibilityInfo(d).visible;}
     // Sovereignty persists where neither army currently projects control.
     // Occupation overrides all ZOCs; opposing adjacent ZOCs make an empty hex contested.
     refreshHexControl(){
@@ -195,8 +208,8 @@
         for(let row=0;row<this.scenario.rows;row++)for(let col=0;col<this.scenario.cols;col++){
           const side=this.controlAt(col,row),c=this.worldPixel(col,row),pts=hexPoints(c.x,c.y,this.size*.965);
           ctx.save();ctx.beginPath();pts.forEach((v,i)=>i?ctx.lineTo(v.x,v.y):ctx.moveTo(v.x,v.y));ctx.closePath();
-          ctx.fillStyle=side==='Blue'?'rgba(22,93,248,.43)':side==='Red'?'rgba(239,33,48,.43)':'rgba(183,51,208,.50)';ctx.fill();
-          ctx.lineWidth=Math.max(.8,this.zoom);ctx.strokeStyle=side==='Blue'?'rgba(140,206,255,.85)':side==='Red'?'rgba(255,170,174,.85)':'rgba(245,198,255,.95)';ctx.stroke();ctx.restore();
+          ctx.fillStyle=side==='Blue'?'rgba(22,93,248,.43)':side==='Red'?'rgba(239,33,48,.43)':'rgba(45,45,49,.76)';ctx.fill();
+          ctx.lineWidth=Math.max(.8,this.zoom);ctx.strokeStyle=side==='Blue'?'rgba(140,206,255,.85)':side==='Red'?'rgba(255,170,174,.85)':'rgba(150,155,162,.95)';ctx.stroke();ctx.restore();
         }
       }
       // Optional terrain identification overlay; drawn above art, below orders and counters.
@@ -237,6 +250,11 @@
       if(this.showCities&&this.cityStates){
         ctx.save();
         for(const entry of this.cityStates){
+          // M5.32: enemy city production/pacification is not public intelligence.
+          // In normal single-player (None), use the player's side, as for unit spotting.
+          const viewMode=window.ARMAGEDDON_VIEW_MODE||'None';
+          const observer=viewMode==='Red'?'Red':viewMode==='Blue'?'Blue':(window.ARMAGEDDON_SETUP?.playerSide||window.ARMAGEDDON_PLAYER_SIDE||'Blue');
+          if(viewMode!=='Both' && entry.owner!==observer)continue;
           const city=entry.city,pt=this.worldPixel(city.c,city.r);
           const pacifying=!!entry.occupier&&entry.occupier!==entry.owner;
           const producing=!!entry.production;
@@ -592,10 +610,8 @@
         let total=0,previousCell={col:d.col,row:d.row};
         for(const point of route){total+=(point.pauseCount||0)+(point.pause?1:0);total+=movement.cost(d,terrainAt(point.col,point.row),previousCell,point,terrainAt);previousCell=point;}
         const eta=Math.max(0,Math.ceil(total-Math.max(0,d.tis||0)-1e-9));
-        // Draw the estimated arrival turn ABOVE EVERY route hex, not only the destination.
-        // Day/turn advances every 10 movement TIs. Cap the displayed number at 9.
-        const absoluteTI=((window.ARMAGEDDON_CURRENT_DAY||1)-1)*10+(window.ARMAGEDDON_CURRENT_TI||0);
-        let elapsed=Math.max(0,d.pauseTIs||0);
+        // Show only the number of hours remaining to reach each route hex.
+        let elapsed=Math.max(0,d.pauseTIs||0)-Number(d.tis||0);
         // Current TIs are accumulated movement credit, not elapsed hours.
         let from={col:d.col,row:d.row};
         for(const point of route){
@@ -603,16 +619,15 @@
           elapsed+=stepCost;
           const arrivalTI=Math.max(1,Math.ceil(elapsed-1e-9)); // Hours from now, not unspent movement credit
           const frozen=window.ARMAGEDDON_ROUTES_FROZEN?window.ARMAGEDDON_FROZEN_LABELS?.get(d.id+':'+point.col+','+point.row):null;
-          const turn=frozen?frozen.turn:Math.min(9,Math.max(1,Math.floor(Math.max(0,arrivalTI-1)/10)+1));
           const p=this.worldPixel(point.col,point.row);
           const r=Math.max(10,Math.min(17,this.size*.32));
           const cx=p.x,cy=p.y-this.size*.57;
-          ctx.beginPath();ctx.ellipse(cx,cy,r*1.24,r*1.55,0,0,Math.PI*2);
+          ctx.beginPath();ctx.ellipse(cx,cy,r*1.24,r*1.24,0,0,Math.PI*2);
           ctx.fillStyle=selected?'#ffe072':'#ff7075';ctx.fill();
           ctx.strokeStyle='#172332';ctx.lineWidth=2;ctx.stroke();
           ctx.fillStyle='#111927';ctx.font=`bold ${Math.round(r*1.2)}px Arial`;
-          ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(String(turn),cx,cy-5);
-          const hour=frozen?frozen.hour:arrivalTI;ctx.font=`bold ${Math.round(r*1.2)}px Arial`;ctx.fillText(String(hour),cx,cy+9);
+          const hour=frozen?frozen.hour:arrivalTI;
+          ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(String(hour),cx,cy);
           elapsed+=(point.pauseCount||0)+(point.pause?1:0);
           from=point;
         }
@@ -672,10 +687,18 @@
       }
     }
     drawDivision(ctx,d){
+      // Defense in depth: no animation or alternate drawing path can reveal an unspotted unit.
+      if(!this.visibleDivision(d))return;
       const position=(this.showEndPositions&&this.previewPositions?.get(d.id))||this.visualPositions.get(d.id)||d;
       const c=position.pixelX!==undefined?{x:position.pixelX*this.zoom+this.pan.x,y:position.pixelY*this.zoom+this.pan.y}:this.worldPixel(position.col,position.row);
       if(this.showEndPositions&&position.previewOffsetX)c.x+=position.previewOffsetX;
-      const s=this.size,blue=d.side==='Blue',fill=blue?'#174e92':'#a71e29',stroke=blue?'#a5d8ff':'#ffb0b0';
+      const s=this.size,blue=d.side==='Blue';
+      // M5.62: Supply shortage is indicated by a large colored S, never by
+      // recoloring the unit counter. Do not disclose enemy supply under fog of war.
+      const friendly=d.side===(window.ARMAGEDDON_PLAYER_SIDE||'Blue')||window.ARMAGEDDON_VIEW_MODE==='Both';
+      const rating=Number.isFinite(Number(d.supply))?Number(d.supply):1;
+      const fill=blue?'#174e92':'#a71e29';
+      const stroke=blue?'#a5d8ff':'#ffb0b0';
       const w=Math.max(26,s*1.14),h=Math.max(27,s*.88),top=c.y-h/2;
       ctx.save();ctx.shadowColor='#000b';ctx.shadowBlur=4;ctx.fillStyle=fill;ctx.strokeStyle=stroke;
       ctx.lineWidth=this.selectedId===d.id?3:1.4;ctx.beginPath();ctx.roundRect(c.x-w/2,top,w,h,3);ctx.fill();ctx.stroke();ctx.shadowBlur=0;
@@ -717,6 +740,43 @@
       ctx.fillStyle='#fff';ctx.textAlign='center';ctx.textBaseline='middle';
       ctx.font=`bold ${Math.max(9,10*this.zoom)}px Arial`;
       // Division identification remains available in the division report; no number on counters.
+      // Consecutive morale-failure retreat turns: show the count, not an X.
+      const retreatCount=Math.max(0,Number(d.moraleFailureStreak)||0);
+      if(retreatCount>0){
+        const r=Math.max(8,Math.min(14,w*.20)),bx=c.x+w/2-1,by=top+1;
+        ctx.fillStyle='#d92332';ctx.strokeStyle='#fff';ctx.lineWidth=2;
+        ctx.beginPath();ctx.arc(bx,by,r,0,Math.PI*2);ctx.fill();ctx.stroke();
+        ctx.fillStyle='#fff';ctx.textAlign='center';ctx.textBaseline='middle';
+        ctx.font=`900 ${retreatCount>=10?Math.max(9,r*.95):Math.max(12,r*1.4)}px Arial`;
+        ctx.fillText(String(retreatCount),bx,by+1);
+      }
+      // Supply overlay: colored halo identifies independent supply-route and SR states.
+      // Purple = both; cyan = out of supply only; amber = negative rating only.
+      // Friendly/visible divisions only, respecting fog of war.
+      if(this.showSupply&&friendly){
+        const connected=this.supplyAvailability?.get(d.id);
+        if(connected!==undefined){
+          const out=!connected,negative=rating<0;
+          const color=out&&negative?'#d26aff':out?'#36e5ed':negative?'#ffbb38':null;
+          if(color){
+            ctx.save();ctx.shadowBlur=8;ctx.shadowColor=color;ctx.strokeStyle=color;
+            ctx.lineWidth=Math.max(3,2.8*this.zoom);ctx.setLineDash([]);
+            ctx.strokeRect(c.x-w/2-4,top-4,w+8,h+8);ctx.restore();
+          }
+        }
+      }
+      // Visible on the division counter regardless of the supply overlay toggle.
+      // SR 0/+1 has no marker; -1/-2 yellow, -3..-5 orange, -6 and below white.
+      if(friendly&&rating<0){
+        const markerColor=rating>=-2?'#ffe044':rating>=-5?'#ff922e':'#ffffff';
+        const fs=Math.max(17,Math.min(30,w*.56));
+        const mx=c.x-w*.34,my=top+h*.70;
+        ctx.font=`900 ${fs}px Arial`;
+        ctx.textAlign='center';ctx.textBaseline='middle';
+        ctx.lineJoin='round';ctx.lineWidth=Math.max(3,fs*.24);
+        ctx.strokeStyle='#101820';ctx.strokeText('S',mx,my);
+        ctx.fillStyle=markerColor;ctx.fillText('S',mx,my);
+      }
       if(this.selectedId===d.id){ctx.strokeStyle='#f5d77a';ctx.lineWidth=2.5;ctx.setLineDash([4,3]);ctx.beginPath();ctx.arc(c.x,c.y,s*.7,0,Math.PI*2);ctx.stroke();ctx.setLineDash([]);}
       ctx.restore();
     }

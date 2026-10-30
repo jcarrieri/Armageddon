@@ -438,7 +438,7 @@
       if(!spot)throw Error('Not enough valid '+(mobilized?'mobilized':'unmobilized')+' deployment hexes for '+side);
       used.add(key(spot.col,spot.row));
       const type=types[i],n=i+1;
-      scenario.divisions.push({id:(side==='Blue'?'B':'R')+'-'+String(n).padStart(2,'0'),side,name:n+'th '+type,type,strength:type==='Infantry'?10000:8000,efficiency:100,experience:90,supply:1,col:spot.col,row:spot.row});
+      scenario.divisions.push({id:(side==='Blue'?'B':'R')+'-'+String(n).padStart(2,'0'),side,name:n+'th '+type,type,strength:10000,experience:90,supply:1,col:spot.col,row:spot.row});
     }
   }
   global.ARMAGEDDON_FORCE_COUNTS={size:sizeName,scale,perSide:unitsPerSide,cityHexTarget:targetCityHexes,actualCityHexesPerSide:{Blue:cityHexes.filter(p=>isSide(p,'Blue')).length,Red:cityHexes.filter(p=>isSide(p,'Red')).length},mobilizedCityUnits:mobilized?Math.floor(unitsPerSide/3):unitsPerSide,handicap};

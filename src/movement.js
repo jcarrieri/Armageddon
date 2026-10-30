@@ -47,7 +47,7 @@ function isCityBridge(cell,terrainAt){
 }
 function rank(d){return Number.isFinite(d.initiative)?d.initiative:0;}
 class MovementEngine{
- constructor(scenario,terrainAt,planner){this.scenario=scenario;this.terrainAt=terrainAt;this.planner=planner;this.day=1;this.ti=0;this.lastRouteHeads=new Map();for(const d of scenario.divisions){d.tis=Number.isFinite(d.tis)?d.tis:0;this.lastRouteHeads.set(d.id,this.head(d.id));}}
+ constructor(scenario,terrainAt,planner){this.scenario=scenario;this.terrainAt=terrainAt;this.planner=planner;this.day=1;this.ti=0;this.lastRouteHeads=new Map();for(const d of scenario.divisions){d.tis=Number.isFinite(d.tis)?d.tis:0;if(!this.head(d.id))d.tis=Math.min(0,d.tis);this.lastRouteHeads.set(d.id,this.head(d.id));}}
  head(id){const p=this.planner.get(id)[0];return p?key(p):null;}
  step(){
   if(this.ti>=10)throw Error('Day already complete');this.ti++;
@@ -62,6 +62,8 @@ class MovementEngine{
    const b=occupancy.get(this.head(a.id));
    if(!b||b.side===a.side||b.destroyed||b.strength<=0||swapAttackers.has(a.id)||swapDefenders.has(a.id))continue;
    if(this.head(b.id)!==key(a))continue;
+   // A paused division cannot initiate or force a reciprocal attack this hour.
+   if((a.pauseTIs||0)>0||(b.pauseTIs||0)>0)continue;
    const ca=cost(a,this.terrainAt(b.col,b.row),a,b,this.terrainAt,true);
    const cb=cost(b,this.terrainAt(a.col,a.row),b,a,this.terrainAt,true);
    const fa=Number(a.tis||0)+1+1e-9>=ca,fb=Number(b.tis||0)+1+1e-9>=cb;
@@ -76,18 +78,40 @@ class MovementEngine{
    if(d.destroyed||d.strength<=0)continue;
    const head=this.head(d.id),previous=this.lastRouteHeads.get(d.id);
    // A changed first destination cancels previously accumulated movement time.
-   if(previous!==head && previous!==null && head!==null)d.tis=0;
+   if(previous!==head && previous!==null && head!==null)d.tis=Math.min(0,d.tis);
    this.lastRouteHeads.set(d.id,head);
+   // Only a division with an active movement order accumulates movement credit.
+   // Credit is dedicated to the next ordered entry, never banked indefinitely.
+   if(!head){d.tis=Math.min(0,d.tis);continue;}
+   // Pauses consume whole increments; they must not fund movement or attacks.
+   if((d.pauseTIs||0)>0){d.pauseTIs--;continue;}
    d.tis+=1;
    // Reciprocal movement is combat, never a direct swap. The designated
    // defender remains in place this increment, even with a funded route.
-   if(swapDefenders.has(d.id))continue;
-   // A pause consumes this execution increment without moving or attacking.
-   // It does not spend accumulated movement TIs, which continue accruing.
-   if((d.pauseTIs||0)>0){d.pauseTIs--;continue;}
+   if(swapDefenders.has(d.id)){
+     const next=this.planner.get(d.id)[0];
+     const occupant=occupancy.get(key(next));
+     const cap=cost(d,this.terrainAt(next.col,next.row),d,next,this.terrainAt,Boolean(occupant&&occupant.side!==d.side));
+     // Retain full accumulated movement credit while reciprocal combat is pending.
+     continue;
+   }
    if(!head)continue;
    const next=this.planner.get(d.id)[0];
    const occupant=occupancy.get(key(next));
+   // Cap carryover at the price of the next entry. For friendly pass-through,
+   // the entry is an atomic transit to the first available landing hex.
+   let creditCost=cost(d,this.terrainAt(next.col,next.row),d,next,this.terrainAt,Boolean(occupant&&occupant.side!==d.side));
+   if(occupant&&occupant.side===d.side){
+     let from=d,total=0;
+     for(const wp of this.planner.get(d.id)){
+       const segment=cost(d,this.terrainAt(wp.col,wp.row),from,wp,this.terrainAt);
+       if(!Number.isFinite(segment)){total=Infinity;break;}
+       total+=segment;from=wp;
+       if(!occupancy.has(key(wp)))break;
+     }
+     creditCost=total;
+   }
+   // Do not cap movement credit: excess carries into the next ordered hex.
    const primaryAttack=Boolean(occupant&&occupant.side!==d.side);
    // Friendly pass-through: wait in the starting hex until the entire contiguous
    // occupied segment can be traversed and an empty, non-enemy-ZOC hex reached.
@@ -123,10 +147,10 @@ class MovementEngine{
    // An ordered entry into an enemy-occupied hex is an attack, not movement.
    // Resolve the attack from the current hex; never overlap opposing counters.
    if(occupant&&occupant.side!==d.side){
-     // An attack attempt spends the full destination entry cost immediately.
-     // The division must fund that cost anew before another attack attempt.
+     // M5.66: Hold funded entry credit while attacking an occupied hex.
+     // Combat charges remain separate; do not spend entry cost on attack initiation.
      attacks.push({attacker:d.id,defender:occupant.id,from:{col:d.col,row:d.row},to:{col:next.col,row:next.row},entryCost:c,meeting:swapAttackers.get(d.id)===occupant.id,reciprocalMove:swapAttackers.get(d.id)===occupant.id});
-     d.tis=Math.max(0,d.tis-c);continue;
+     continue;
    }
    if(enemyZoc.has(key(d))&&enemyZoc.has(key(next))){
      // ZOC-to-ZOC movement is an attack against an adjacent enemy whose ZOC
@@ -136,7 +160,12 @@ class MovementEngine{
        global.ARMAGEDDON_ZOC.neighbors(e,this.scenario).some(n=>key(n)===key(next)));
      defenders.sort((a,b)=>rank(b)-rank(a)||a.id.localeCompare(b.id));
      if(defenders.length){attacks.push({attacker:d.id,defender:defenders[0].id,from:{col:d.col,row:d.row},to:{col:next.col,row:next.row},entryCost:c,meeting:true,zocAttack:true});d.tis=Math.max(0,d.tis-c);}
-     else zocStops.push({id:d.id,from:{col:d.col,row:d.row},to:{col:next.col,row:next.row},reason:'ZOC-to-ZOC without an eligible adjacent defender'});
+     else {
+       // No eligible defender covers both hexes: the destination is empty and
+       // no ZOC-to-ZOC battle is possible. Treat it as an ordinary move,
+       // subject to the same simultaneous destination-claim resolution.
+       candidates.push({d,from:{col:d.col,row:d.row},to:{col:next.col,row:next.row},cost:c,remaining:d.tis-c});
+     }
      continue;
    }
    candidates.push({d,from:{col:d.col,row:d.row},to:{col:next.col,row:next.row},cost:c,remaining:d.tis-c});
@@ -173,7 +202,7 @@ class MovementEngine{
    visiting.delete(id);allowed.set(id,ok);return ok;
   }
   const events=[...chosen.values()].filter(c=>canMove(c.d.id));
-  const blockedUnits=[...new Set([...zocStops.map(z=>z.id),...candidates.filter(c=>!events.includes(c)&&!meetingLosers.has(c.d.id)).map(c=>c.d.id)])];
+  const blockedUnits=[...new Set(candidates.filter(c=>!events.includes(c)&&!meetingLosers.has(c.d.id)).map(c=>c.d.id))];
   const moved=new Set(events.map(e=>e.d.id));
   // Do not erase accumulated TIs for units waiting on a friendly pass-through.
   // Their entire transit must be funded before the atomic hop can occur.
@@ -181,10 +210,13 @@ class MovementEngine{
   for(const e of events){e.d.col=e.to.col;e.d.row=e.to.row;e.d.tis-=e.cost;const consumed=this.planner.get(e.d.id).splice(0,e.routeSteps||1);e.path=[e.from,...consumed.map(p=>({col:p.col,row:p.row}))];
     const pauses=consumed.reduce((n,point)=>n+(point.pauseCount||0)+(point.pause?1:0),0);
     e.d.pauseTIs=(e.d.pauseTIs||0)+pauses;
+    // Keep fractional movement credit left after paying this hex entry cost.
+    // Clear unused positive credit only if the route is now complete.
+    if(!this.head(e.d.id))e.d.tis=Math.min(0,e.d.tis);
     this.lastRouteHeads.set(e.d.id,this.head(e.d.id));}
   return {day:this.day,ti:this.ti,events:events.map(e=>({id:e.d.id,from:e.from,to:e.to,cost:e.cost,path:e.path})),blocked:candidates.length-events.length+zocStops.length,blockedUnits,zocStops,attacks,attempted:[...attempted]};
  }
- nextDay(){if(this.ti!==10)throw Error('Complete all 10 TIs first');this.day++;this.ti=0;for(const d of this.scenario.divisions){this.lastRouteHeads.set(d.id,this.head(d.id));}}
+ nextDay(){if(this.ti!==10)throw Error('Complete all 10 TIs first');this.day++;this.ti=0;for(const d of this.scenario.divisions){/* Nightfall does not erase accumulated movement TIs or deficits. */this.lastRouteHeads.set(d.id,this.head(d.id));}}
 }
 global.ARMAGEDDON_MOVEMENT={explainCost,MovementEngine,cost,SPEED,isCityBridge};
 })(window);

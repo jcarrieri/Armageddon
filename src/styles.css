@@ -41,3 +41,87 @@
 #selectionPanel .division-strength-first{margin-bottom:12px}
 
 #readyButton[hidden],#blueStartButton[hidden],#redStartButton[hidden]{display:none!important}
+
+/* M5.46: show failed morale warning in red, without a passed badge. */
+#divisionMoraleLabel.morale-failing{color:#ff5c62;font-weight:800;}
+
+/* M5.78: readable, centered viewport-wide Daily Situation Report. */
+#endDayOverlay.day-overlay{position:fixed!important;inset:50% auto auto 50%!important;transform:translate(-50%,-50%)!important;z-index:10000!important;width:min(1040px,calc(100vw - 48px))!important;height:min(790px,calc(100dvh - 48px))!important;max-height:calc(100dvh - 48px)!important;padding:0!important;display:flex;flex-direction:column;overflow:hidden;background:#14212d;border:2px solid #718a9d;border-radius:15px;box-shadow:0 0 0 100vmax rgba(0,0,0,.70),0 25px 90px #000c;font-family:Inter,Segoe UI,Arial,sans-serif}
+#endDayOverlay[hidden]{display:none!important}
+#endDayOverlay .report-header{position:sticky;top:0;z-index:2;flex:0 0 auto;display:flex;justify-content:space-between;align-items:center;gap:16px;margin:0;padding:22px 28px;background:#203446;border-bottom:1px solid #476174;letter-spacing:normal}
+#endDayOverlay .report-kicker{font-size:11px;letter-spacing:.16em;color:#e4c57e;font-weight:800}
+#endDayOverlay #dayReportTitle{font-size:25px;line-height:1.25;margin:4px 0;color:#fff;letter-spacing:normal}
+#endDayOverlay .report-subtitle{font-size:13px;color:#b8cfdd}
+#endDayOverlay #dayReportClose{flex:none;width:auto;min-width:115px;height:46px;background:#bb3d3d;color:#fff;border:2px solid #f0a3a3;border-radius:8px;font-size:17px;font-weight:800;padding:0 20px}
+#endDayOverlay #dayReportClose:hover{background:#d04c4c}
+#endDayOverlay .report-scroll{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:25px 28px 32px;scrollbar-gutter:stable}
+#endDayOverlay .report-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:25px}
+#endDayOverlay .report-stat{padding:16px;background:#203342;border:1px solid #415a6b;border-radius:9px;min-width:0}
+#endDayOverlay .report-stat span{display:block;color:#c5d5df;font-size:13px;margin-bottom:10px}
+#endDayOverlay .report-stat strong{display:block;color:#fff;font-size:25px;line-height:1.2;font-variant-numeric:tabular-nums}
+#endDayOverlay .blue strong,#endDayOverlay .blue{color:#8fc7ff}#endDayOverlay .red strong,#endDayOverlay .red{color:#ffaaaa}
+#endDayOverlay .report-section{margin:25px 0}#endDayOverlay .report-section h3{font-size:19px;color:#fff;margin:0 0 13px;border-bottom:1px solid #496070;padding-bottom:10px}
+#endDayOverlay .report-operations{display:grid;grid-template-columns:1fr 1fr;gap:0 24px}
+#endDayOverlay .report-operation{display:flex;justify-content:space-between;gap:12px;align-items:baseline;padding:12px 0;border-bottom:1px solid #304656;font-size:14px}
+#endDayOverlay .report-operation span{color:#c5d5df}#endDayOverlay .report-operation strong{color:#fff;text-align:right;overflow-wrap:anywhere}
+#endDayOverlay .report-battle{border:1px solid #476071;border-radius:10px;padding:18px;margin-bottom:14px;background:#1c2c39}
+#endDayOverlay .report-battle-head{display:flex;flex-wrap:wrap;gap:8px 18px;justify-content:space-between;align-items:center;font-size:15px}
+#endDayOverlay .report-battle-head strong{font-size:17px;color:#fff}#endDayOverlay .report-battle-head span{color:#d6e3eb}
+#endDayOverlay .report-battle-losses{display:flex;flex-wrap:wrap;gap:24px;margin-top:12px;font-size:14px;font-weight:700}
+#endDayOverlay details{margin-top:14px;color:#c5d8e6}#endDayOverlay summary{cursor:pointer;font-size:14px;font-weight:700;padding:8px 0;color:#e5edf4}
+#endDayOverlay .report-table-scroll{overflow-x:auto;max-width:100%}#endDayOverlay .report-table{width:100%;border-collapse:collapse;font-size:13px;margin:10px 0}#endDayOverlay .report-table th,#endDayOverlay .report-table td{padding:10px 12px;text-align:left;border-bottom:1px solid #3c5364;white-space:nowrap}#endDayOverlay .report-table th{background:#293e4e;color:#fff}
+#endDayOverlay .report-audit{border:1px solid #40586b;border-radius:9px;padding:12px 16px;margin-top:24px}#endDayOverlay #dayCombatDetail{white-space:pre;overflow:auto;max-width:100%;max-height:400px;background:#0e1b26;border-radius:6px;padding:16px;font:12px/1.7 Consolas,monospace;color:#e2edf6}
+#endDayOverlay .report-note{font-size:12px;color:#b4c5d1;line-height:1.6}#endDayOverlay .report-empty{font-size:15px;color:#c4d3de;padding:16px 0}
+@media(max-width:720px){#endDayOverlay.day-overlay{width:calc(100vw - 18px)!important;height:calc(100dvh - 18px)!important;max-height:calc(100dvh - 18px)!important}#endDayOverlay .report-header{padding:14px}#endDayOverlay #dayReportTitle{font-size:19px}#endDayOverlay #dayReportClose{min-width:90px;font-size:14px;padding:0 9px}#endDayOverlay .report-scroll{padding:15px}#endDayOverlay .report-stats{grid-template-columns:repeat(2,minmax(0,1fr))}#endDayOverlay .report-stat strong{font-size:21px}#endDayOverlay .report-operations{grid-template-columns:1fr}}
+
+/* M5.79: compact, truly viewport-centered report with readable side-by-side columns. */
+#endDayOverlay.day-overlay{position:fixed!important;top:50%!important;left:50%!important;right:auto!important;bottom:auto!important;inset:auto!important;transform:translate(-50%,-50%)!important;width:min(690px,calc(100vw - 40px))!important;height:min(650px,calc(100dvh - 40px))!important;max-width:calc(100vw - 40px)!important;box-sizing:border-box!important;}
+#endDayOverlay .report-stats{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:10px!important;}
+#endDayOverlay .report-stat{padding:12px!important;}
+#endDayOverlay .report-stat strong{font-size:21px!important;}
+#endDayOverlay .report-operations{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:0 16px!important;}
+#endDayOverlay .report-operation{min-width:0!important;display:block!important;padding:11px 0!important;}
+#endDayOverlay .report-operation span{display:block!important;font-size:13px!important;margin-bottom:5px!important;}
+#endDayOverlay .report-operation strong{display:block!important;text-align:left!important;font-size:15px!important;overflow-wrap:anywhere!important;}
+#endDayOverlay .report-scroll{padding:18px 22px 24px!important;}
+#endDayOverlay .report-section{margin:18px 0!important;}
+@media(max-width:520px){#endDayOverlay .report-operations{grid-template-columns:1fr!important;}#endDayOverlay .report-header{padding:12px!important;}#endDayOverlay .report-scroll{padding:12px!important;}}
+
+/* M5.80: true viewport-centered report, independent of map and layout dimensions. */
+#endDayOverlay.report-backdrop{position:fixed!important;inset:0!important;top:0!important;left:0!important;right:0!important;bottom:0!important;transform:none!important;width:100vw!important;height:100dvh!important;max-width:none!important;max-height:none!important;display:flex!important;align-items:center!important;justify-content:center!important;z-index:2147483000!important;overflow:hidden!important;padding:16px!important;margin:0!important;background:rgba(0,0,0,.78)!important;border:0!important;border-radius:0!important;box-shadow:none!important;}
+#endDayOverlay.report-backdrop[hidden]{display:none!important;}
+#endDayOverlay .report-dialog{width:min(720px,100%)!important;height:min(650px,100%)!important;max-height:100%!important;min-width:0!important;position:relative!important;display:flex!important;flex-direction:column!important;overflow:hidden!important;border:2px solid #8299ab!important;border-radius:14px!important;background:#14212d!important;box-shadow:0 24px 75px #000b!important;}
+#endDayOverlay .report-header{flex-shrink:0!important;}
+#endDayOverlay .report-scroll{min-width:0!important;overflow-y:auto!important;overflow-x:hidden!important;}
+#endDayOverlay .report-stats{grid-template-columns:repeat(2,minmax(0,1fr))!important;}
+#endDayOverlay .report-operations{grid-template-columns:repeat(2,minmax(0,1fr))!important;}
+@media(max-width:520px){#endDayOverlay .report-operations{grid-template-columns:1fr!important;}}
+
+/* M5.81: compact, readable firing lines beneath operational summary */
+#endDayOverlay .report-fire-list{display:flex;flex-direction:column;gap:0;max-width:100%}
+#endDayOverlay .report-fire-line{display:flex;flex-wrap:wrap;justify-content:space-between;gap:5px 14px;padding:10px 4px;border-bottom:1px solid #344c5d;font-size:14px;line-height:1.4}
+#endDayOverlay .report-fire-who{color:#e7f1fa;font-weight:600;overflow-wrap:anywhere}
+#endDayOverlay .report-fire-result{color:#b7d4e7;overflow-wrap:anywhere}
+
+/* M5.87: compact daily report — values beside captions. */
+#endDayOverlay .report-stats{gap:6px 10px!important;margin-bottom:12px!important;}
+#endDayOverlay .report-stat{display:flex!important;align-items:center!important;justify-content:space-between!important;gap:10px!important;padding:9px 12px!important;min-height:0!important;}
+#endDayOverlay .report-stat span{display:inline!important;margin:0!important;font-size:13px!important;line-height:1.3!important;}
+#endDayOverlay .report-stat strong{display:inline!important;margin:0!important;font-size:17px!important;line-height:1.3!important;text-align:right!important;white-space:nowrap!important;}
+#endDayOverlay .report-operation{display:flex!important;align-items:center!important;justify-content:space-between!important;gap:10px!important;padding:8px 0!important;}
+#endDayOverlay .report-operation span{display:inline!important;margin:0!important;font-size:13px!important;line-height:1.3!important;}
+#endDayOverlay .report-operation strong{display:inline!important;text-align:right!important;font-size:14px!important;line-height:1.3!important;white-space:nowrap!important;}
+#endDayOverlay .report-section{margin:12px 0!important;}
+#endDayOverlay .report-section h3{margin-bottom:8px!important;padding-bottom:7px!important;}
+@media(max-width:520px){#endDayOverlay .report-stats{grid-template-columns:1fr!important;}#endDayOverlay .report-operations{grid-template-columns:1fr!important;}}
+
+/* M5.88: unfinished routes full-width with right-aligned value. */
+#endDayOverlay .report-routes{display:flex!important;justify-content:space-between!important;align-items:center!important;gap:12px!important;}
+#endDayOverlay .report-routes span{display:inline!important;margin:0!important;}
+#endDayOverlay .report-routes strong{display:inline!important;margin-left:auto!important;text-align:right!important;}
+
+/* M5.92: accessible report links to live divisions. */
+#endDayOverlay .report-unit-link{appearance:none;border:0;background:transparent;color:#8bd7ff;text-decoration:underline;text-underline-offset:3px;cursor:pointer;font:inherit;text-align:left;padding:2px 0;max-width:100%;overflow-wrap:anywhere}
+#endDayOverlay .report-unit-link:hover{color:#fff}
+#endDayOverlay .report-unit-link:focus-visible{outline:2px solid #ffe08a;outline-offset:2px;border-radius:2px}
+#endDayOverlay .report-fire-who.report-unit-link{font-weight:600}

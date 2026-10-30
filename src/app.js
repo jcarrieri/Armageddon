@@ -1,6 +1,7 @@
 (function(){
   const data=window.ARMAGEDDON_DATA,canvas=document.getElementById('battlefield');
   const renderer=new window.ARMAGEDDON_HEX.HexMapRenderer(canvas,data.scenario,data.terrainAt);
+  window.ARMAGEDDON_DEBUG_RENDERER=renderer;
   const planner=new window.ARMAGEDDON_ROUTES.RoutePlanner(data.scenario);
   const unitSymbolsToggle=document.getElementById('unitSymbolsToggle');
   const unitSymbolSelect=document.getElementById('unitSymbolStyle');
@@ -17,8 +18,85 @@
   renderer.routes=planner;
   renderer.playtest=planner.playtest;
   const cities=window.ARMAGEDDON_CITY.create(data.scenario,data.terrainAt,renderer);
+  renderer.cityForHex=(col,row)=>cities.cityForHex(col,row);
   const engine=new window.ARMAGEDDON_MOVEMENT.MovementEngine(data.scenario,data.terrainAt,planner);
+  // M5.95: one AI strategic/operational plan per planning day. The AI's
+  // movement orders use the same engine as the human player's orders.
+  let aiPlannedDay=null;
+  let awaitingExecutionConfirmation=false; // M6.11: inspect both sides' routes before execution.
+  function prepareAIDay(){
+    if(aiPlannedDay===engine.day)return window.ARMAGEDDON_LAST_AI_OPERATIONS;
+    const side=(window.ARMAGEDDON_SETUP?.playerSide||'Blue')==='Blue'?'Red':'Blue';
+    // Evaluate spotting from the AI side, independent of human view/playtest.
+    const distance=(a,b)=>renderer.spottingDistance(a,b);
+    const friendly=data.scenario.divisions.filter(d=>d.side===side&&!d.destroyed&&d.strength>0);
+    const visibleEnemyIds=new Set(data.scenario.divisions.filter(d=>{
+      if(d.side===side)return true;
+      if(d.destroyed||d.strength<=0)return false;
+      const terrain=String(data.terrainAt(d.col,d.row)||'').toLowerCase();
+      const concealed=/urban|city|forest|wood|swamp|mountain/.test(terrain)||!!cities.cityForHex(d.col,d.row);
+      return friendly.some(f=>distance(f,d)<=(concealed?1:3));
+    }).map(d=>d.id));
+    const strategic=window.ARMAGEDDON_STRATEGIC_AI.plan({scenario:data.scenario,cityStates:cities.state,side,visibleEnemyIds});
+    const operations=window.ARMAGEDDON_AI_OPERATIONS.generate({scenario:data.scenario,terrainAt:data.terrainAt,strategic,visibleEnemyIds,cityStates:cities.state});
+    const issued=window.ARMAGEDDON_AI_OPERATIONS.apply(operations,planner);
+    window.ARMAGEDDON_LAST_AI_PLAN=strategic;
+    window.ARMAGEDDON_LAST_AI_OPERATIONS=operations;
+    aiPlannedDay=engine.day;
+    console.info('ARMAGEDDON AI daily plan',engine.day,side,issued,'orders',operations.notes);
+    return operations;
+  }
+  // M6.00: explain every AI division's movement or hold decision.
+  const aiOrdersButton=document.getElementById('aiOrdersButton');
+  if(aiOrdersButton)aiOrdersButton.addEventListener('click',()=>{
+    const ops=window.ARMAGEDDON_LAST_AI_OPERATIONS;
+    const old=document.getElementById('aiOrdersReport');if(old)old.remove();
+    const panel=document.createElement('div');panel.id='aiOrdersReport';
+    panel.style.cssText='position:fixed;z-index:9999;inset:7% 12%;overflow:auto;background:#132c39;color:white;border:2px solid #79c7ed;border-radius:10px;padding:20px;box-shadow:0 12px 45px #000b;font:14px Arial';
+    const title=document.createElement('h2');title.textContent='AI Orders Report';panel.append(title);
+    const close=document.createElement('button');close.textContent='Close';close.style.cssText='padding:8px 18px;margin-bottom:12px';close.onclick=()=>panel.remove();panel.append(close);
+    const intro=document.createElement('p');intro.textContent=ops?`${ops.side} · ${ops.ordersIssued} movement orders · ${ops.diagnostics.length} divisions evaluated · ${ops.visibleEnemies} visible enemy divisions. MOVE ${ops.summary?.move??'?'} · HOLD ${ops.summary?.hold??'?'} · BLOCKED ${ops.summary?.blocked??'?'}. Latest daily plan.`:'No AI orders generated yet. Press Ready to execute a day, then inspect this report.';panel.append(intro);
+    if(ops){const table=document.createElement('table');table.style.cssText='width:100%;border-collapse:collapse';
+      const header=document.createElement('tr');for(const label of ['Division','Mission','Status','Reason']){const th=document.createElement('th');th.textContent=label;th.style.cssText='text-align:left;padding:7px;border-bottom:1px solid #668';header.append(th);}table.append(header);
+      for(const d of ops.diagnostics){const tr=document.createElement('tr');for(const value of [d.name,d.mission,d.status,d.reason]){const td=document.createElement('td');td.textContent=value;td.style.cssText='padding:6px;border-bottom:1px solid #345';tr.append(td);}table.append(tr);}panel.append(table);
+      const notes=document.createElement('p');notes.textContent=ops.notes.join(' | ');panel.append(notes);
+    }document.body.append(panel);
+  });
+  // M5.93: strategic AI stage A/B preview. Does not modify orders or game state.
+  const aiPlanButton=document.getElementById('aiPlanButton');
+  if(aiPlanButton)aiPlanButton.addEventListener('click',()=>{
+    if(executing)return;
+    const side=(window.ARMAGEDDON_PLAYER_SIDE||'Blue')==='Blue'?'Red':'Blue';
+    const visibleEnemyIds=new Set(data.scenario.divisions.filter(d=>d.side===side||renderer.isUnitVisible?.(d,side)===true).map(d=>d.id));
+    // No renderer visibility API means no enemy intelligence, never omniscience.
+    const plan=window.ARMAGEDDON_STRATEGIC_AI.plan({scenario:data.scenario,cityStates:cities.state,side,visibleEnemyIds});
+    window.ARMAGEDDON_LAST_AI_PLAN=plan;
+    const old=document.getElementById('aiPlanPreview');if(old)old.remove();
+    const panel=document.createElement('div');panel.id='aiPlanPreview';panel.style.cssText='position:fixed;z-index:9999;inset:8% 15%;overflow:auto;background:#132c39;color:#fff;border:2px solid #79c7ed;border-radius:10px;padding:20px;box-shadow:0 12px 45px #000b;font:14px Arial';
+    const title=document.createElement('h2');title.textContent=`${side} AI Strategic Plan — Day ${engine.day}`;panel.append(title);
+    const note=document.createElement('p');note.textContent=`Cautious · 20% reserve target (${plan.reserveTarget}) · ${plan.capitalEmergency?'CAPITAL EMERGENCY':'No capital emergency'} · ${plan.visibleEnemies} visible enemy divisions · Operational orders are generated automatically when Ready is pressed.`;panel.append(note);
+    const close=document.createElement('button');close.textContent='Close';close.style.cssText='padding:8px 18px;margin-bottom:10px;cursor:pointer';close.onclick=()=>panel.remove();panel.append(close);
+    const heading=document.createElement('h3');heading.textContent='Strategic objectives';panel.append(heading);
+    const list=document.createElement('ol');for(const o of plan.objectives.slice(0,15)){const li=document.createElement('li');li.textContent=`${o.type}: ${o.city.name} — score ${o.score}, divisions requested ${o.required}`;list.append(li);}panel.append(list);
+    const heading2=document.createElement('h3');heading2.textContent='Division assignments';panel.append(heading2);
+    const ul=document.createElement('ul');for(const a of plan.assignments){const li=document.createElement('li');li.textContent=`${a.name}: ${a.mission}${a.target?' — '+a.target:''}`;ul.append(li);}panel.append(ul);
+    document.body.append(panel);
+  });
+
   for(const d of data.scenario.divisions){d.stance='Hold';if(!Number.isFinite(d.experience))d.experience=75;}
+  // M5.52: Daily morale recovery = 10 - 0.06 * current morale,
+  // followed by a penalty of 1 per negative supply-rating point.
+  // Apply at the start of the day; do not alter experience.
+  function recoverDailyEffectiveness(){
+    for(const d of data.scenario.divisions){
+      if(d.destroyed || d.strength<=0)continue;
+      const sr=Number.isFinite(d.supply)?d.supply:1;
+      const supplyPenalty=Math.max(0,-sr);
+      const previous=Number.isFinite(d.effectiveness)?d.effectiveness:100;
+      const recovery=10-0.06*previous;
+      d.effectiveness=Math.min(100,Math.max(10,previous+recovery-supplyPenalty));
+    }
+  }
   // Turn-start RP is credited during planning, once per day (including day one).
   cities.awardTurn();
   cities.chargeMaintenance(engine.day);
@@ -49,7 +127,7 @@
     if(event.altKey||event.ctrlKey||event.metaKey||event.repeat||executing)return;
     const tag=event.target?.tagName?.toLowerCase();
     if(['input','textarea','select'].includes(tag)||event.target?.isContentEditable)return;
-    const shortcuts={e:'endPositionsToggle',r:'replacementToggle',z:'zocToggle',c:'citiesOverlayToggle',h:'hexControlToggle',m:'mapControlsToggle',d:'deployReinforcement',u:'unitSymbolsToggle'};
+    const shortcuts={e:'endPositionsToggle',r:'replacementToggle',z:'zocToggle',c:'citiesOverlayToggle',s:'supplyOverlayToggle',h:'hexControlToggle',m:'mapControlsToggle',d:'deployReinforcement',u:'unitSymbolsToggle'};
     // V: display canonical river/stream crossing sides and report selected route costs.
     if(event.key.toLowerCase()==='v'){
       event.preventDefault();renderer.showWaterCrossings=!renderer.showWaterCrossings;renderer.render();
@@ -67,6 +145,20 @@
   });
   const zocButton=document.getElementById('zocToggle');
   renderer.cityStates=cities.state;
+  // Reuse the same supply-network test as the daily report, without changing ratings.
+  function refreshSupplyOverlay(){
+    if(!renderer.showSupply)return;
+    renderer.refreshHexControl();
+    renderer.supplyAvailability=window.ARMAGEDDON_SUPPLY.check(data.scenario,data.terrainAt,(c,r)=>renderer.controlAt(c,r),cities.state);
+  }
+  const supplyOverlayButton=document.getElementById('supplyOverlayToggle');
+  supplyOverlayButton.addEventListener('click',()=>{
+    renderer.showSupply=!renderer.showSupply;
+    refreshSupplyOverlay();
+    supplyOverlayButton.textContent='Supply: '+(renderer.showSupply?'ON':'OFF');
+    supplyOverlayButton.setAttribute('aria-pressed',String(renderer.showSupply));
+    renderer.render();
+  });
   const citiesOverlayButton=document.getElementById('citiesOverlayToggle');
   citiesOverlayButton.addEventListener('click',()=>{
     renderer.showCities=!renderer.showCities;
@@ -84,56 +176,121 @@
   const controlsOverlay=document.getElementById('mapControlsOverlay');
   const controlsButton=document.getElementById('mapControlsToggle');
   const dayOverlay=document.getElementById('endDayOverlay');
+  // Put the dialog under document.body so map transforms cannot displace fixed positioning.
+  document.body.appendChild(dayOverlay);
   const reportButton=document.getElementById('dayReportButton');
   const toggleControls=()=>{controlsOverlay.hidden=!controlsOverlay.hidden;controlsButton.setAttribute('aria-pressed',String(!controlsOverlay.hidden));if(!controlsOverlay.hidden)dayOverlay.hidden=true;};
   controlsButton.addEventListener('click',toggleControls);
   const closeControls=()=>{controlsOverlay.hidden=true;controlsButton.setAttribute('aria-pressed','false');};
   controlsOverlay.addEventListener('click',closeControls);
   controlsOverlay.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();closeControls();}});
-  let latestReport=null;
-  function showReport(){if(!latestReport){document.getElementById('endDayBody').textContent='Complete a day with Ready to generate the first report.';}else{
-    const r=latestReport;
-    document.getElementById('dayReportTitle').textContent=`DAY ${r.day} — END OF DAY`;
-    const body=document.getElementById('endDayBody');body.replaceChildren();
-    const line=(label,value)=>{const el=document.createElement('div');el.className='report-line';const a=document.createElement('span');a.textContent=label;const b=document.createElement('strong');b.textContent=value;el.append(a,b);body.append(el);};
-    line('Movement events',String(r.moves));line('Engagements (hourly)',String(r.engagements));
-    line('Blue casualties',r.losses.Blue.toLocaleString());line('Red casualties',r.losses.Red.toLocaleString());
-    line('Blue remaining strength',r.remaining.Blue.toLocaleString());line('Red remaining strength',r.remaining.Red.toLocaleString());
-    line('Blue divisions eliminated',String(r.destroyed.Blue));line('Red divisions eliminated',String(r.destroyed.Red));
-    line('Unfinished routes',String(r.routes));
-    line('Blue maintenance (RP)',Number(r.maintenance?.Blue||0).toFixed(2));
-    line('Red maintenance (RP)',Number(r.maintenance?.Red||0).toFixed(2));
-    for(const side of ['Blue','Red']){
-      const affected=r.negativeSupply?.[side]||[];
-      if(!affected.length){line(side+' negative supply divisions','None');continue;}
-      for(const unit of affected)line(side+' · '+unit.name, 'Supply '+unit.rating);
+  let latestReport=null;let latestCombatDetail="No completed day yet.";
+  // Report navigation uses stable division IDs, not names, which may repeat.
+  function navigateFromReport(unitId){
+    const unit=data.scenario.divisions.find(d=>d.id===unitId);
+    if(!unit || unit.destroyed || unit.strength<=0)return;
+    dayOverlay.hidden=true;
+    selectedId=unit.id;
+    renderer.setSelection(unit.id);
+    renderer.centerOnHex(unit.col,unit.row);
+    updateReport(unit);
+    refreshChoices();
+    positionStance();
+  }
+  function reportUnitLink(unitId,label,cls=''){
+    const unit=data.scenario.divisions.find(d=>d.id===unitId);
+    if(!unit || unit.destroyed || unit.strength<=0){
+      const span=document.createElement('span');span.className=cls;span.textContent=label;return span;
     }
-    line('Blue replacement activity',r.replacements?.Blue||'No replacements dispatched or received');
-    line('Red replacement activity',r.replacements?.Red||'No replacements dispatched or received');
-    const note=document.createElement('p');note.className='report-note';note.textContent='Combat losses are provisional. Blue-only reports currently include aggregate Red casualties and strengths for playtesting; operational intelligence restrictions will be applied to the final reporting system.';body.append(note);
-  }dayOverlay.hidden=false;controlsOverlay.hidden=true;controlsButton.setAttribute('aria-pressed','false');}
-  reportButton.addEventListener('click',showReport);document.getElementById('sidebarReportButton').addEventListener('click',showReport);
+    const button=document.createElement('button');button.type='button';
+    button.className='report-unit-link '+cls;button.textContent=label;
+    button.title='Close report and center on '+(unit.name||unit.id);
+    button.addEventListener('click',()=>navigateFromReport(unitId));
+    return button;
+  }
+
+  function showReport(){
+    const body=document.getElementById('endDayBody');
+    const battleArea=document.getElementById('reportBattles');
+    const make=(tag,cls,content)=>{const el=document.createElement(tag);if(cls)el.className=cls;if(content!==undefined)el.textContent=String(content);return el;};
+    body.replaceChildren();battleArea.replaceChildren();
+    if(!latestReport){body.append(make('p','report-empty','Complete a game day using Ready to generate the first Daily Situation Report.'));document.getElementById('dayReportTitle').textContent='Daily Situation Report';}
+    else{
+      const r=latestReport;
+      document.getElementById('dayReportTitle').textContent=`Daily Situation Report — Day ${r.day}`;
+      const grid=make('div','report-stats');body.append(grid);
+      const stat=(label,value,kind='')=>{const card=make('div','report-stat '+kind);card.append(make('span','',label),make('strong','',value));grid.append(card);};
+      const fmt=n=>Number(n||0).toLocaleString();
+      stat('Combat engagements',fmt(r.engagements));stat('Movement events',fmt(r.moves));
+      stat('Blue casualties',fmt(r.losses?.Blue),'blue');stat('Red casualties',fmt(r.losses?.Red),'red');
+      stat('Blue troops remaining',fmt(r.remaining?.Blue),'blue');stat('Red troops remaining',fmt(r.remaining?.Red),'red');
+      stat('Blue divisions lost',fmt(r.destroyed?.Blue),'blue');stat('Red divisions lost',fmt(r.destroyed?.Red),'red');
+      const other=make('section','report-section');other.append(make('h3','','Operations & logistics'));body.append(other);
+      const list=make('div','report-operations');other.append(list);
+      const item=(label,value)=>{const row=make('div','report-operation');row.append(make('span','',label),make('strong','',value));list.append(row);};
+      item('Blue maintenance',Number(r.maintenance?.Blue||0).toFixed(2)+' RP');
+      item('Red maintenance',Number(r.maintenance?.Red||0).toFixed(2)+' RP');
+      // Side-by-side supply comparisons: Blue always left, Red always right.
+      for(const [caption,source] of [['divisions out of supply','outOfSupply'],['divisions with negative supply','negativeSupply']]){
+        for(const side of ['Blue','Red'])item(side+' '+caption,fmt(r[source]?.[side]?.length||0));
+      }
+      item('Blue Repl',r.replacements?.Blue||'None');
+      item('Red Repl',r.replacements?.Red||'None');
+      for(const side of ['Blue','Red']){
+        const affected=r.negativeSupply?.[side]||[];
+        if(affected.length){const details=make('details','report-supply');details.append(make('summary','',`View ${side} negative supply ratings (${affected.length})`));const ul=make('ul','');for(const unit of affected){const li=make('li','');li.append(reportUnitLink(unit.id,`${unit.name} — Supply ${unit.rating}`));ul.append(li);}details.append(ul);other.append(details);}
+      }
+      const routesRow=make('div','report-operation report-routes');routesRow.append(make('span','','Unfinished movement routes'),make('strong','',fmt(r.routes)));other.append(routesRow);
+      const fireSection=make('section','report-section');fireSection.append(make('h3','','Combat fire — one line per attack or defense'));body.append(fireSection);
+      const shots=r.fireLines||[];
+      if(!shots.length){fireSection.append(make('p','report-empty','No combat fire recorded for this day.'));}
+      else{
+        const list=make('div','report-fire-list');fireSection.append(list);
+        for(const shot of shots){
+          const line=make('div','report-fire-line');
+          const who=reportUnitLink(shot.unitId,`Hour ${shot.hour} · ${shot.side} ${shot.unit} → ${shot.target}`,'report-fire-who');
+          const what=make('span','report-fire-result',`${shot.role} · ${Math.round(Number(shot.damage)||0).toLocaleString()} casualties inflicted`);
+          line.append(who,what);list.append(line);
+        }
+      }
+      const note=make('p','report-note','One line for each recorded firing exchange. Detailed combat calculations remain hidden.');body.append(note);
+    }
+    document.getElementById('dayCombatDetail').textContent=latestCombatDetail;
+    dayOverlay.hidden=false;controlsOverlay.hidden=true;controlsButton.setAttribute('aria-pressed','false');
+    document.getElementById('reportScroll').scrollTop=0;
+  }
+  reportButton.addEventListener('click',showReport);document.getElementById('sidebarReportButton').addEventListener('click',showReport);document.getElementById('dayReportClose').addEventListener('click',()=>dayOverlay.hidden=true);
   // Click the report itself or any visible battlefield area to dismiss it.
-  dayOverlay.addEventListener('click',()=>dayOverlay.hidden=true);
-  canvas.addEventListener('pointerdown',()=>{if(!dayOverlay.hidden)dayOverlay.hidden=true;});
+  // The report remains open for scrolling and selection until explicitly closed.
+  
   let executing=false;
   const byId=id=>data.scenario.divisions.find(d=>d.id===id);
   // M4.69: copyable, fixed-column Daily Situation snapshot.
   // Dam is credited proportionally to actual losses, never merely theoretical fire.
-  const dsDam=new Map();let dsBattles=[];let dsFiring=new Set();let dsStart=new Map();let dsEffStart=new Map();let dsExpStart=new Map();let dsModifiers=new Map();let dsTerrain=new Map();let dsIP=new Map(); // All divisions that fired in the most recently executed day.
+  const dsDam=new Map();let dsBattles=[];let dsShots=[];let dsFiring=new Set();let dsStart=new Map();let dsEffStart=new Map();let dsExpStart=new Map();let dsModifiers=new Map();let dsTerrain=new Map();let dsIP=new Map(); // All divisions that fired in the most recently executed day.
   const dsInt=n=>String(Math.max(0,Math.round(Number(n)||0)));
   const dsNum=n=>Number.isFinite(Number(n))?Number(n).toFixed(2):'0.00';
   function dsSnapshot(){
-    const rows=[['Unit','Start','End','Firing','AtkTer','DefTer','Eff1','Eff2','Exp1','Exp2','Sup','Mod','IP','Cas','Dam']];
-    for(const d of data.scenario.divisions){
-      // Debug DS includes both armies, regardless of playtest viewing side.
-      if(!dsFiring.has(d.id))continue; // M4.73: show only units firing this execution hour.
-      rows.push([d.id,dsInt(dsStart.get(d.id)??d.strength),dsInt(d.strength),'Yes',dsTerrain.get(d.id)?.attacker?.weight?dsNum(dsTerrain.get(d.id).attacker.value):'—',dsTerrain.get(d.id)?.defender?.weight?dsNum(dsTerrain.get(d.id).defender.value):'—',dsNum(dsEffStart.get(d.id)??d.efficiency??100),dsNum(d.efficiency??100),dsNum(dsExpStart.get(d.id)??d.experience??75),dsNum(d.experience??75),dsNum(d.supply),dsNum(dsModifiers.get(d.id)?.value??1),dsNum(dsIP.get(d.id)??d.ip??0),dsInt(d.totalCasualties),dsInt(dsDam.get(d.id)||0)]);
+    const headers=['Hour','Battle','Unit','Target','Role','Start','End','AtkTer','DefTer','Mor1','Mor2','Exp1','Exp2','Sup','Mod','IP','Cas','Dam'];
+    const records=[];
+    for(const group of dsShots){
+      const lines=[];
+      for(const f of group.shots){
+        const d=byId(f.unit);if(!d)continue;
+        const role=f.dsRole||((f.role==='Attacker')?'Supporting Attacker':'Supporting Defender');
+        const attacking=role.endsWith('Attacker');
+        lines.push([String(group.hour),group.battle,String(f.unit),String(f.target),role,
+          dsInt(dsStart.get(f.unit)??f.strength),dsInt(d.strength),attacking?dsNum(f.terrain):'—',!attacking?dsNum(f.terrain):'—',
+          dsNum(dsEffStart.get(f.unit)??f.effectiveness),dsNum(d.effectiveness??100),dsNum(dsExpStart.get(f.unit)??d.experience??75),dsNum(d.experience??75),
+          dsNum(f.supply),dsNum(f.finalRating),dsNum((1-(f.improvedPosition??1))*100),dsInt(d.totalCasualties),dsInt(f.damage)]);
+      }
+      if(lines.length)records.push(lines);
     }
-    const widths=rows[0].map((_,i)=>Math.max(...rows.map(r=>r[i].length)));
-    const output=rows.map(r=>r.map((v,i)=>i===0||i===3?v.padEnd(widths[i]):v.padStart(widths[i])).join('  ')).join('\n');
-    const history=dsBattles.length?'\n\nALL BATTLES THIS DAY\nHour  Attacker  Defender  Blue losses  Red losses\n'+dsBattles.map(b=>[String(b.hour).padStart(4),String(b.attacker).padEnd(8),String(b.defender).padEnd(8),String(b.blueLoss).padStart(11),String(b.redLoss).padStart(10)].join('  ')).join('\n'):'\n\nNo battles this day';
-    return (rows.length===1?output+'\nNo units fired this turn':output)+history;
+    const flat=records.flat();const widths=headers.map((h,i)=>Math.max(h.length,...flat.map(r=>r[i].length)));
+    const fmt=r=>r.map((v,i)=>i<5?v.padEnd(widths[i]):v.padStart(widths[i])).join('  ');
+    const body=records.map(lines=>lines.map(fmt).join('\n')).join('\n\n');
+    const history=dsBattles.length?'\n\nALL BATTLES THIS DAY\nHour  Attacker  Defender  Blue losses  Red losses\n'+dsBattles.map(b=>[String(b.hour).padStart(4),String(b.attacker).padEnd(8),String(b.defender).padEnd(8),String(b.blueLoss).padStart(11),String(b.redLoss).padStart(10)].join('  ')).join('\n\n'):'\n\nNo battles this day';
+    return fmt(headers)+'\n'+(body||'No units fired this turn')+history;
   }
   function refreshDS(){const el=document.getElementById('dsText');if(el)el.textContent=dsSnapshot();}
   // M4.71: Copy only the DS snapshot, never the surrounding page text.
@@ -171,19 +328,17 @@
     document.getElementById('divisionStrength').textContent=d.strength.toLocaleString('en-US');document.getElementById('divisionLosses').textContent=(d.totalCasualties||0).toLocaleString('en-US');
     const showSensitive=window.ARMAGEDDON_VIEW_MODE==='Both'||d.side===(window.ARMAGEDDON_PLAYER_SIDE||'Blue');
     for(const el of document.querySelectorAll('.sensitive-stat'))el.hidden=!showSensitive;
+    const moraleLabel=document.getElementById('divisionMoraleLabel');
+    const moraleFailing=showSensitive&&d.lastMoraleCheck==='failed';
+    moraleLabel.textContent=moraleFailing?'Morale — FAILING':'Morale';
+    moraleLabel.classList.toggle('morale-failing',moraleFailing);
     document.getElementById('divisionEffectiveness').textContent=showSensitive?(Number.isFinite(d.effectiveness)?d.effectiveness.toFixed(1):'100.0'):'—';
     document.getElementById('divisionExperience').textContent=showSensitive?(Number.isFinite(d.experience)?d.experience.toFixed(1):'—'):'—';
-    // Movement credit at the beginning of this planning turn, and projected credit
-    // after all currently plotted entries (negative values are legitimate deficits).
-    const startCredit=Number.isFinite(d._dayTIBudget)?d._dayTIBudget:10+Number(d.tis||0);
-    let spent=0,fromCell={col:d.col,row:d.row};
-    for(const wp of planner.get(d.id)){
-      spent+=window.ARMAGEDDON_MOVEMENT.cost(d,data.terrainAt(wp.col,wp.row),fromCell,wp,data.terrainAt);
-      spent+=(wp.pauseCount||0)+(wp.pause?1:0);fromCell=wp;
-    }
+    // Show actual accumulated movement credit, not the 10-hour daily allowance.
+    // A negative balance is a genuine movement deficit (e.g. after retreat).
+    const credit=Number(d.tis||0);
     const tiFmt=x=>Number.isFinite(x)?x.toFixed(1):'—';
-    document.getElementById('divisionStartTIs').textContent=tiFmt(Math.max(0,startCredit-Number(d._dayTISpent||0)));
-    document.getElementById('divisionRemainingTIs').textContent=tiFmt(startCredit-Number(d._dayTISpent||0)-spent);
+    document.getElementById('divisionStartTIs').textContent=tiFmt(credit);
     document.getElementById('divisionSupply').textContent=Number.isFinite(d.supply)?(d.supply>0?'+':'')+d.supply:'+1';
     document.getElementById('divisionReplacements').textContent=showSensitive?(d.replacementsOnWay??'None'):'—';
 
@@ -204,11 +359,14 @@
   // Shared-screen visibility/control; None preserves the setup side.
   const originalSide=window.ARMAGEDDON_PLAYER_SIDE||'Blue';
   window.ARMAGEDDON_VIEW_MODE='None';
+  // Inspect individual spotting decisions with ARMAGEDDON_SPOTTING_DEBUG().
   function setPlaytestSide(mode){
-    if(executing)return;
+    // Visibility is a live display setting, including during turn execution.
     window.ARMAGEDDON_VIEW_MODE=mode;
     window.ARMAGEDDON_PLAYER_SIDE=(mode==='Blue'||mode==='Red')?mode:originalSide;
-    planner.setPlaytest(mode==='Both');renderer.playtest=mode==='Both';
+    // Do not modify order permissions in the middle of an executing turn.
+    if(!executing)planner.setPlaytest(mode==='Both');
+    renderer.playtest=mode==='Both';
     playtestButton.textContent='Playtest Side: '+mode.toUpperCase();
     playtestButton.setAttribute('aria-pressed',String(mode!=='None'));
     document.querySelectorAll('input[name="playtestSide"]').forEach(r=>r.checked=r.value===mode);
@@ -222,7 +380,8 @@
   }
   document.querySelectorAll('input[name="playtestSide"]').forEach(r=>r.addEventListener('change',()=>setPlaytestSide(r.value)));
   playtestButton.style.display='none';
-  setPlaytestSide('None');
+  setPlaytestSide('None'); // M6.20: normal single-player visibility by default.
+  window.ARMAGEDDON_SPOTTING_DEBUG=()=>{const view=window.ARMAGEDDON_VIEW_MODE;const side=view==='Red'?'Red':view==='Blue'?'Blue':originalSide;const rows=data.scenario.divisions.filter(d=>d.side!==side).map(d=>({unit:d.id,hex:`${d.col},${d.row}`,...renderer.visibilityInfo(d)}));console.table(rows);return rows;};
 
   const status=document.getElementById('routeStatus');
   function localPoint(e){const r=canvas.getBoundingClientRect();return {x:e.clientX-r.left,y:e.clientY-r.top};}
@@ -286,7 +445,7 @@ if(drag&&down&&Math.hypot(p.x-down.x,p.y-down.y)>4)moved=true;if(drag&&moved){re
   window.addEventListener('unhandledrejection',e=>debugLog('UNHANDLED REJECTION',{reason:String(e.reason),stack:e.reason?.stack}));
   // Single-player only. The controlling nation is chosen at game setup.
   window.ARMAGEDDON_PLAYER_SIDE=new URLSearchParams(location.search).get('playerSide')||'Blue';
-  function syncRp(){const blue=document.getElementById('blueRpGroup'),red=document.getElementById('redRpGroup');blue.hidden=!planner.playtest&&window.ARMAGEDDON_PLAYER_SIDE!=='Blue';red.hidden=!planner.playtest&&window.ARMAGEDDON_PLAYER_SIDE!=='Red';}
+  function syncRp(){const blue=document.getElementById('blueRpGroup'),red=document.getElementById('redRpGroup');if(!blue||!red)return;const side=window.ARMAGEDDON_PLAYER_SIDE||'Blue';const both=window.ARMAGEDDON_VIEW_MODE==='Both';blue.hidden=side==='Red'&&!both;red.hidden=both||side!=='Red';}
   function syncMp(){syncRp();renderer.render();refreshChoices();}
   const readyButton=document.getElementById('readyButton');
   const tiLabel=document.getElementById('tiLabel');
@@ -310,7 +469,7 @@ if(drag&&down&&Math.hypot(p.x-down.x,p.y-down.y)>4)moved=true;if(drag&&moved){re
     const initial=parsed?new Date(parsed+'T12:00:00'):new Date();
     const date=new Date(initial.getFullYear(),initial.getMonth(),initial.getDate()+Math.max(0,engine.day-1));
     const dateText=date.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
-    gameClock.textContent=`${dateText} · ${displayHour}:00 ${hour<12?'AM':'PM'}`;
+    gameClock.textContent=`${dateText} · ${displayHour}:00 ${hour<12?'AM':'PM'} · Turn ${engine.day}`;
   }
   updateGameClock();
   const phaseLabel=document.getElementById('phaseLabel');
@@ -359,7 +518,7 @@ if(drag&&down&&Math.hypot(p.x-down.x,p.y-down.y)>4)moved=true;if(drag&&moved){re
     const d=byId(event.id);
     const from={...event.from},to={...event.to};
     await trackCamera(from.col,from.row);
-    sound.movement(d?.type||'Infantry',{duration:1.5});
+    sound.movement(d?.type||'Infantry',{duration:animationDuration(1500)/1000});
     const duration=animationDuration(1500),start=performance.now();
     // Logical state has already been resolved; the renderer uses separate visual coordinates.
     for(;;){
@@ -381,10 +540,22 @@ if(drag&&down&&Math.hypot(p.x-down.x,p.y-down.y)>4)moved=true;if(drag&&moved){re
       renderer.visualPositions.set(e.id,{pixelX:(start.x-renderer.pan.x)/renderer.zoom,pixelY:(start.y-renderer.pan.y)/renderer.zoom});
     }
     for(const e of group){
+      // M6.20: unseen enemy moves resolve instantly; never track camera or play sound.
+      const unit=byId(e.id);
+      const view=window.ARMAGEDDON_VIEW_MODE;
+      const enemy=(view==='None'||view==='Blue'||view==='Red') && unit && unit.side!==(view==='Red'?'Red':view==='Blue'?'Blue':originalSide);
+      const visible=unit&&renderer.visibleDivision(unit);
+      const onScreen=point=>{
+        const p=renderer.worldPixel(point.col,point.row);
+        return p.x>=0&&p.y>=0&&p.x<=renderer.dims.w&&p.y<=renderer.dims.h;
+      };
+      if(enemy&&(!visible||![e.from,e.to,...(e.path||[])].some(onScreen))){
+        renderer.visualPositions.delete(e.id);
+        continue;
+      }
       // Finish camera travel before any unit motion or movement sound.
       await trackCamera(e.from.col,e.from.row);
-      const unit=byId(e.id);
-      sound.movement(unit?.type||'Infantry',{duration:1.5});
+      sound.movement(unit?.type||'Infantry',{duration:animationDuration(1500)/1000});
       const duration=animationDuration(1500),startTime=performance.now();
       // A friendly-occupied pass-through may legally cover multiple adjacent
       // hexes in one logical commit. Animate the actual route, not a direct hop.
@@ -411,29 +582,32 @@ if(drag&&down&&Math.hypot(p.x-down.x,p.y-down.y)>4)moved=true;if(drag&&moved){re
     // These are visual-only: casualties have already been computed simultaneously.
     const pairs=(engagement.firePairs||[]).map(p=>({from:byId(p.source),to:byId(p.target),role:p.role})).filter(p=>p.from&&p.to);
     if(pairs.length){
-      await trackCamera(pairs[0].from.col,pairs[0].from.row);
-      sound.combat(pairs[0].from.type||'mixed');
-      const start=performance.now(),duration=animationDuration(3000);
-      while(true){
-        const t=Math.min(1,(performance.now()-start)/duration);
-        renderer.render();const ctx=renderer.ctx;
-        ctx.save();
-        for(const [i,p] of pairs.entries()){
-          const a=renderer.worldPixel(p.from.col,p.from.row),b=renderer.worldPixel(p.to.col,p.to.row);
-          const phase=(t*2+i/Math.max(1,pairs.length))%1;
-          const x=a.x+(b.x-a.x)*phase,y=a.y+(b.y-a.y)*phase;
-          ctx.strokeStyle=p.from.side==='Blue'?'rgba(255,220,112,.95)':'rgba(255,115,80,.95)';
-          ctx.lineWidth=Math.max(1.5,renderer.zoom*2.6);
-          ctx.beginPath();ctx.moveTo(x-(b.x-a.x)*.12,y-(b.y-a.y)*.12);ctx.lineTo(x,y);ctx.stroke();
-          // Impact flashes and lingering smoke for each individual exchange.
-          const burst=(t*3+i*.37)%1;
-          if(burst<.50){const radius=renderer.size*(.12+burst*.65);const glow=ctx.createRadialGradient(b.x,b.y,0,b.x,b.y,radius);glow.addColorStop(0,`rgba(255,250,198,${.80-burst})`);glow.addColorStop(.45,`rgba(255,127,24,${.60-burst})`);glow.addColorStop(1,'rgba(60,45,45,0)');ctx.fillStyle=glow;ctx.beginPath();ctx.arc(b.x,b.y,radius,0,Math.PI*2);ctx.fill();}
-          ctx.fillStyle=`rgba(38,43,42,${.12*Math.sin(Math.PI*t)})`;ctx.beginPath();ctx.arc(b.x+Math.sin(i*7)*renderer.size*.22,b.y-renderer.size*t*.40,renderer.size*(.20+t*.20),0,Math.PI*2);ctx.fill();
-          if(t<.25){ctx.fillStyle=ctx.strokeStyle;ctx.beginPath();ctx.arc(a.x,a.y,Math.max(2,renderer.zoom*4),0,Math.PI*2);ctx.fill();}
+      // M6.18: one two-second volley per firing division; all its targets flash together.
+      const groups=new Map();
+      for(const pair of pairs){const key=pair.from.id;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(pair);}
+      for(const shots of groups.values()){
+        const shooter=shots[0].from;
+        await trackCamera(shooter.col,shooter.row);
+        sound.combat(shooter.type||'mixed',{duration:animationDuration(2000)/1000});
+        const start=performance.now(),duration=animationDuration(2000);
+        while(true){
+          const t=Math.min(1,(performance.now()-start)/duration);
+          renderer.render();const ctx=renderer.ctx;ctx.save();
+          for(const p of shots){
+            const a=renderer.worldPixel(p.from.col,p.from.row),b=renderer.worldPixel(p.to.col,p.to.row);
+            const phase=(t*5)%1;
+            const x=a.x+(b.x-a.x)*phase,y=a.y+(b.y-a.y)*phase;
+            ctx.strokeStyle=p.from.side==='Blue'?'rgba(255,220,112,.95)':'rgba(255,115,80,.95)';
+            ctx.lineWidth=Math.max(1.5,renderer.zoom*2.6);
+            ctx.beginPath();ctx.moveTo(x-(b.x-a.x)*.12,y-(b.y-a.y)*.12);ctx.lineTo(x,y);ctx.stroke();
+            const burst=(t*5)%1;
+            if(burst<.5){const radius=renderer.size*(.12+burst*.65);const glow=ctx.createRadialGradient(b.x,b.y,0,b.x,b.y,radius);glow.addColorStop(0,`rgba(255,250,198,${.80-burst})`);glow.addColorStop(.45,`rgba(255,127,24,${.60-burst})`);glow.addColorStop(1,'rgba(60,45,45,0)');ctx.fillStyle=glow;ctx.beginPath();ctx.arc(b.x,b.y,radius,0,Math.PI*2);ctx.fill();}
+            ctx.fillStyle=`rgba(38,43,42,${.12*Math.sin(Math.PI*t)})`;ctx.beginPath();ctx.arc(b.x,b.y-renderer.size*t*.4,renderer.size*(.2+t*.2),0,Math.PI*2);ctx.fill();
+            if(t<.25){ctx.fillStyle=ctx.strokeStyle;ctx.beginPath();ctx.arc(a.x,a.y,Math.max(2,renderer.zoom*4),0,Math.PI*2);ctx.fill();}
+          }
+          ctx.restore();if(t>=1)break;
+          await new Promise(resolve=>requestAnimationFrame(resolve));
         }
-        ctx.restore();
-        if(t>=1)break;
-        await new Promise(resolve=>requestAnimationFrame(resolve));
       }
       renderer.render();return;
     }
@@ -511,44 +685,75 @@ if(drag&&down&&Math.hypot(p.x-down.x,p.y-down.y)>4)moved=true;if(drag&&moved){re
   }
   // Show a clear blocked-unit marker and play the 2-second warning once per
   // blocked division per hour. This is cosmetic and does not alter movement.
+  // M5.20: conspicuous, cosmetic blocked-move animation. The counter lunges
+  // toward its next plotted hex, rebounds, and flashes a STOP marker. No game
+  // coordinates, orders, or accumulated movement TIs are changed.
   async function animateBlocked(ids){
-    const units=[...new Set(ids)].map(byId).filter(d=>d&&!d.destroyed);
+    const units=[...new Set(ids)].map(byId).filter(d=>d&&!d.destroyed&&renderer.visibleDivision(d));
     if(!units.length)return;
     await trackCamera(units[0].col,units[0].row);
     sound.blocked();
+    // The movement engine has already committed this TI atomically. Keep all
+    // successful movers drawn at their pre-TI hexes until the blocked warning
+    // finishes, so the blocking counter is still visibly occupying its hex.
     const start=performance.now(),duration=animationDuration(2000);
-    while(performance.now()-start<duration){
-      renderer.render();const ctx=renderer.ctx;ctx.save();ctx.setTransform(renderer.dpr,0,0,renderer.dpr,0,0);
-      const phase=(performance.now()-start)/duration;
-      for(const d of units){const p=renderer.worldPixel(d.col,d.row);
-        ctx.fillStyle='#e03d31';ctx.strokeStyle='#ffffff';ctx.lineWidth=2;
-        ctx.beginPath();ctx.arc(p.x,p.y-renderer.size*.95,renderer.size*.31,0,Math.PI*2);ctx.fill();ctx.stroke();
-        ctx.fillStyle='#ffffff';ctx.textAlign='center';ctx.textBaseline='middle';ctx.font=`bold ${Math.max(13,renderer.size*.43)}px Arial`;
-        ctx.fillText('×',p.x,p.y-renderer.size*.95);
-        ctx.font=`bold ${Math.max(10,renderer.size*.19)}px Arial`;
-        ctx.fillStyle=phase<.75?'#fff2b3':'#ffffff';ctx.fillText('BLOCKED',p.x,p.y-renderer.size*1.37);
+    const heldPositions=new Map(renderer.visualPositions);
+    try{
+      while(performance.now()-start<duration){
+        const phase=Math.min(1,(performance.now()-start)/duration);
+        renderer.visualPositions.clear();
+        for(const [id,pos] of heldPositions)renderer.visualPositions.set(id,pos);
+        for(const d of units){
+          const next=planner.get(d.id)[0];
+          if(next){
+            const dx=next.col-d.col,dy=next.row-d.row;
+            const lunge=Math.sin(phase*Math.PI*4)**2*.17*(1-phase*.55);
+            renderer.visualPositions.set(d.id,{col:d.col+dx*lunge,row:d.row+dy*lunge});
+          }
+        }
+        renderer.render();const ctx=renderer.ctx;ctx.save();ctx.setTransform(renderer.dpr,0,0,renderer.dpr,0,0);
+        for(const d of units){
+          const p=renderer.worldPixel(d.col,d.row),pulse=1+.12*Math.sin(phase*Math.PI*8);
+          const next=planner.get(d.id)[0];
+          const blocker=next?renderer.worldPixel(next.col,next.row):p;
+          const markerX=(p.x+blocker.x)/2, markerY=(p.y+blocker.y)/2;
+          const y=markerY;
+          ctx.globalAlpha=.8+.2*Math.sin(phase*Math.PI*6)**2;
+          ctx.fillStyle='#d92d20';ctx.strokeStyle='#ffffff';ctx.lineWidth=3;
+          ctx.beginPath();ctx.arc(markerX,y,renderer.size*.38*pulse,0,Math.PI*2);ctx.fill();ctx.stroke();
+          ctx.fillStyle='#ffffff';ctx.textAlign='center';ctx.textBaseline='middle';
+          ctx.font=`bold ${Math.max(14,renderer.size*.48)}px Arial`;ctx.fillText('×',markerX,y);
+          ctx.font=`bold ${Math.max(11,renderer.size*.23)}px Arial`;
+          ctx.lineWidth=3;ctx.strokeStyle='#15191d';
+          ctx.strokeText('BLOCKED',markerX,markerY-renderer.size*.65);
+          ctx.fillText('BLOCKED',markerX,markerY-renderer.size*.65);
+        }
+        ctx.restore();await frame();
       }
-      ctx.restore();await frame();
+    }finally{
+      renderer.visualPositions.clear();
+      for(const [id,pos] of heldPositions)renderer.visualPositions.set(id,pos);
+      renderer.render();
     }
-    renderer.render();
   }
-  async function animateRetreat(retreats){sound.retreat();const started=performance.now();const duration=animationDuration(4000);const original=retreats.map(r=>({r,d:byId(r.id),from:r.from||null})).filter(x=>x.d&&!x.d.destroyed);while(performance.now()-started<duration){const f=Math.min(1,(performance.now()-started)/duration);for(const x of original){const from=x.from||x.d,to=x.r.to||x.d;renderer.visualPositions.set(x.d.id,{col:from.col+(to.col-from.col)*f,row:from.row+(to.row-from.row)*f});}renderer.render();await frame();}renderer.visualPositions.clear();renderer.render();}
+  async function animateRetreat(retreats){sound.retreat();const started=performance.now();const duration=animationDuration(4000);const original=retreats.map(r=>({d:byId(r.id),from:{...r.from},to:{...r.to}})).filter(x=>x.d&&!x.d.destroyed&&Number.isFinite(x.from.col)&&Number.isFinite(x.to.col));while(performance.now()-started<duration){const f=Math.min(1,(performance.now()-started)/duration);for(const x of original)renderer.visualPositions.set(x.d.id,visualTween(x.from,x.to,f));renderer.render();await frame();}for(const x of original)renderer.visualPositions.delete(x.d.id);renderer.refreshHexControl();renderer.render();}
   async function animateSurrender(destroyed,before){sound.surrender();const started=performance.now();const duration=animationDuration(6000);while(performance.now()-started<duration){renderer.render();const f=Math.min(1,(performance.now()-started)/duration),ctx=renderer.ctx;ctx.save();ctx.setTransform(renderer.dpr,0,0,renderer.dpr,0,0);for(const d of destroyed){const pos=before.get(d.id)||d,p=renderer.worldPixel(pos.col,pos.row);ctx.globalAlpha=1-f*.85;ctx.fillStyle='#ffe8a2';ctx.strokeStyle='#ed4d38';ctx.lineWidth=4;ctx.beginPath();ctx.arc(p.x,p.y,renderer.size*(.4+f*.7),0,Math.PI*2);ctx.stroke();ctx.font=`bold ${Math.max(13,renderer.size*.36)}px Arial`;ctx.textAlign='center';ctx.fillText('SURRENDER',p.x,p.y-renderer.size*(.7+f));}ctx.restore();await frame();}renderer.render();}
   async function runDay(){
     if(executing){debugLog('runDay rejected: already executing');return;}
     debugLog('runDay ENTER',{day:engine.day,engineHour:engine.ti});
-    if(engine.ti>=10){engine.nextDay();cities.awardTurn();cities.chargeMaintenance(engine.day);replacements.startDay(engine.day);tiLabel.textContent=`Day ${engine.day} · Planning`;updateGameClock();saveGame(true);}
+    if(engine.ti>=10){engine.nextDay();recoverDailyEffectiveness();cities.awardTurn();cities.chargeMaintenance(engine.day);replacements.startDay(engine.day);tiLabel.textContent=`Day ${engine.day} · Planning`;updateGameClock();saveGame(true);}
     // Resume from the next unprocessed TI if a prior execution was interrupted.
     // Diagnostics stay in memory; do not show a debug overlay.
     const charged=cities.getMaintenance()?.totals||{Blue:0,Red:0};
-    const daySummary={day:engine.day,moves:0,engagements:0,losses:{Blue:0,Red:0},destroyed:{Blue:0,Red:0},remaining:{Blue:0,Red:0},routes:0,maintenance:{...charged},supplyProblems:{Blue:0,Red:0},negativeSupply:{Blue:[],Red:[]},replacements:{Blue:'No replacements dispatched or received',Red:'No replacements dispatched or received'}};
+    const daySummary={day:engine.day,moves:0,engagements:0,losses:{Blue:0,Red:0},destroyed:{Blue:0,Red:0},remaining:{Blue:0,Red:0},routes:0,maintenance:{...charged},supplyProblems:{Blue:0,Red:0},outOfSupply:{Blue:[],Red:[]},negativeSupply:{Blue:[],Red:[]},replacements:{Blue:'No replacements dispatched or received',Red:'No replacements dispatched or received'}};
     dayOverlay.hidden=true;
     sound.unlock();
     // Preserve the complete planning snapshot BEFORE the first execution increment.
     // Replaying restores this exact state, including plotted routes and replacement packets.
     if(!saveTurnStart()){status.textContent='Warning: could not save turn-start replay snapshot.';}
-    for(const d of data.scenario.divisions){d._dayTIBudget=10+Number(d.tis||0);d._dayTISpent=0;}
-    dsDam.clear();dsBattles=[];dsFiring=new Set();dsStart=new Map(data.scenario.divisions.map(d=>[d.id,d.strength]));dsEffStart=new Map(data.scenario.divisions.map(d=>[d.id,Number.isFinite(d.efficiency)?d.efficiency:100]));dsExpStart=new Map(data.scenario.divisions.map(d=>[d.id,Number.isFinite(d.experience)?d.experience:75]));dsModifiers=new Map();dsTerrain=new Map();dsIP=new Map();refreshDS(); // New execution day: clear previous day firing history.
+    for(const d of data.scenario.divisions){if(!planner.get(d.id).length)d.tis=Math.min(0,Number(d.tis||0));d._dayTIBudget=10+Number(d.tis||0);d._dayTISpent=0;}
+    const dailyCombatParticipants=new Set(); // M5.27: any primary or supporting combatant, once per day.
+    dsDam.clear();dsBattles=[];dsShots=[];dsFiring=new Set();dsStart=new Map(data.scenario.divisions.map(d=>[d.id,d.strength]));dsEffStart=new Map(data.scenario.divisions.map(d=>[d.id,Number.isFinite(d.effectiveness)?d.effectiveness:100]));dsExpStart=new Map(data.scenario.divisions.map(d=>[d.id,Number.isFinite(d.experience)?d.experience:75]));dsModifiers=new Map();dsTerrain=new Map();dsIP=new Map();refreshDS(); // New execution day: clear previous day firing history.
     executing=true;window.ARMAGEDDON_EXECUTION_HIDE_ROUTES=true;readyButton.disabled=true;playtestButton.disabled=true;
     floatingStance.style.display='none';
     phaseLabel.textContent='EXECUTING';
@@ -556,9 +761,8 @@ if(drag&&down&&Math.hypot(p.x-down.x,p.y-down.y)>4)moved=true;if(drag&&moved){re
     debugLog('Routes counted',{ordered,units:data.scenario.divisions.length,samples:data.scenario.divisions.filter(d=>planner.get(d.id).length).slice(0,8).map(d=>({id:d.id,pos:[d.col,d.row],route:planner.get(d.id).slice(0,3),hours:d.tis}))});
     status.textContent=ordered?`Executing orders for ${ordered} division(s)…`:'Executing 10 hours — no movement routes have been plotted.';
     try{
-      // Freeze supply status at the beginning of the turn.
-      const turnSupply=window.ARMAGEDDON_SUPPLY.check(data.scenario,data.terrainAt);
-      // Negative supply ratings are reported after the day's supply adjustments.
+      // M5.59: Supply is evaluated after all movement, combat, morale retreats,
+      // displacement, advances and surrender, using final division positions.
       const repActivity=replacements.history[engine.day]||{Blue:{created:0,received:0,lost:0},Red:{created:0,received:0,lost:0}};
       for(const side of ['Blue','Red']){const r=repActivity[side];daySummary.replacements[side]=`${r.created} dispatched, ${r.received} arrived, ${r.lost} lost`;}
       await sleep(60);
@@ -567,9 +771,13 @@ if(drag&&down&&Math.hypot(p.x-down.x,p.y-down.y)>4)moved=true;if(drag&&moved){re
       for(let ti=engine.ti+1;ti<=10;ti++){
         const before=new Map(data.scenario.divisions.map(d=>[d.id,{col:d.col,row:d.row}]));
         debugLog('Hour begin',{ti,day:engine.day});status.textContent=`Processing hour ${ti} of 10…`;await sleep(0);
-        const stepStarted=performance.now();const result=engine.step();updateGameClock();
+        const stepStarted=performance.now();const result=engine.step();
+        // Refresh territorial control immediately after each atomic movement increment,
+        // before combat, supply queries, or the next movement increment.
+        if(result.events.length)renderer.refreshHexControl();
+        updateGameClock();
         for(const e of result.events||[]){const d=byId(e.id);if(d)d._dayTISpent=(d._dayTISpent||0)+Number(e.cost||0);}
-        for(const a of result.attacks||[]){const d=byId(a.attacker);if(d)d._dayTISpent=(d._dayTISpent||0)+Number(a.entryCost||0);}
+        // Initiating combat does not spend the accumulated hex-entry credit.
         updateReport(selectedId?byId(selectedId):null);const stepMs=Math.round(performance.now()-stepStarted);daySummary.moves+=result.events.length;
         const waitingSample=data.scenario.divisions.filter(d=>!d.destroyed&&planner.get(d.id).length).slice(0,5).map(d=>{const next=planner.get(d.id)[0];return {id:d.id,from:[d.col,d.row],to:[next.col,next.row],accumulated:+d.tis.toFixed(2),required:window.ARMAGEDDON_MOVEMENT.cost(d,data.terrainAt(next.col,next.row),d,next,data.terrainAt)};});
         debugLog('Hour resolved',{ti,stepMs,moves:result.events.length,blocked:result.blocked,zocStops:result.zocStops.length,events:result.events.slice(0,8),waitingSample});
@@ -579,6 +787,16 @@ if(drag&&down&&Math.hypot(p.x-down.x,p.y-down.y)>4)moved=true;if(drag&&moved){re
           if(waiting.length){const first=waiting[0],next=planner.get(first.id)[0],required=window.ARMAGEDDON_MOVEMENT.cost(first,data.terrainAt(next.col,next.row),first,next,data.terrainAt);
             status.textContent=`Hour ${ti}/10 — 0 moves. ${first.name}: ${Number(first.tis||0).toFixed(1)} / ${Number.isFinite(required)?required.toFixed(1):'∞'} movement hours accumulated for next hex.`;
           }else status.textContent=`Hour ${ti}/10 — no divisions have movement orders.`;
+        }
+        // M5.30: Present blocked attempts BEFORE successful movement. The
+        // engine has resolved all moves from one simultaneous TI snapshot;
+        // this changes only their presentation order, not TI accounting.
+        if(result.blockedUnits?.length){
+          for(const e of result.events||[]){
+            const p=renderer.worldPixel(e.from.col,e.from.row);
+            renderer.visualPositions.set(e.id,{pixelX:(p.x-renderer.pan.x)/renderer.zoom,pixelY:(p.y-renderer.pan.y)/renderer.zoom});
+          }
+          await animateBlocked(result.blockedUnits);
         }
         // Animate all simultaneous hourly moves together, preserving atomic state.
         if(result.events.length){
@@ -590,15 +808,47 @@ if(drag&&down&&Math.hypot(p.x-down.x,p.y-down.y)>4)moved=true;if(drag&&moved){re
         }else{
           renderer.visualPositions.clear();
         }
-        if(result.blockedUnits?.length)await animateBlocked(result.blockedUnits);
         await sleep(40);
         cities.updateOccupation();window.ARMAGEDDON_CITY_STATE=cities.state.map(c=>({...c,owner:cities.owner(c)}));
         const combatResult=window.ARMAGEDDON_COMBAT.resolve(data.scenario,data.terrainAt,engine.day,ti,result.attacks,planner,result.events,result.attempted);
+        // Include all connected combat participants, even units with no shot.
+        for(const id of combatResult.participants||[])dailyCombatParticipants.add(id);
         // M4.72: combat reporting is driven by actual firing exchanges, not
         // mere adjacency, movement, or a nominal attack event.
         const engagements=(combatResult.engagements||[]).filter(e=>
           Array.isArray(e.firePairs)&&e.firePairs.some(p=>
             p.source&&p.target&&p.source!==p.target));
+        // Credit every actual battle participant (primary or supporter), even if
+        // they could not fire in this increment. Never count mere adjacency.
+        for(const e of engagements){
+          for(const id of [e.attacker,e.defender])if(id)dailyCombatParticipants.add(id);
+          for(const f of [...(e.attackerFactors||[]),...(e.defenderFactors||[]),...(e.supportFactors||[])])if(f.unit)dailyCombatParticipants.add(f.unit);
+          for(const pair of e.firePairs||[])for(const id of [pair.source,pair.target])if(id)dailyCombatParticipants.add(id);
+        }
+        // Combat experience must be credited from actual shot records as well as
+        // engagement metadata. Some simultaneous volleys have shots without a
+        // separate engagement entry for every participant.
+        for(const shot of combatResult.shots||[]){
+          if(shot.unit)dailyCombatParticipants.add(shot.unit);
+          if(shot.target)dailyCombatParticipants.add(shot.target);
+        }
+        if(combatResult.shots?.length){
+          // Record every individual firing exchange exactly once, separated by battle.
+          const groups=new Map();
+          for(const shot of combatResult.shots){
+            const matching=engagements.find(e=>shot.unit===e.attacker||shot.unit===e.defender||shot.target===e.attacker||shot.target===e.defender);
+            const battle=matching?.battleId||`${shot.unit}>${shot.target}`;
+            if(!groups.has(battle))groups.set(battle,[]);
+            const primaryAttacker=matching?.attacker;
+            const primaryDefender=matching?.defender;
+            const firingSide=byId(shot.unit)?.side;
+            const attackingSide=byId(primaryAttacker)?.side;
+            const isAttackingSide=attackingSide?firingSide===attackingSide:shot.role==='Attacker';
+            const dsRole=shot.unit===primaryAttacker?'Primary Attacker':shot.unit===primaryDefender?'Primary Defender':isAttackingSide?'Supporting Attacker':'Supporting Defender';
+            groups.get(battle).push({...shot,dsRole});
+          }
+          for(const [battle,shots] of groups)dsShots.push({hour:ti,battle,shots});
+        }
         for(const id of combatResult.firingUnits||[]){dsFiring.add(id);const unit=byId(id);if(unit)dsIP.set(id,Number(unit.ip)||0);} // Record IP at latest firing hour, not a later report time.
         // Mod: damage-weighted mean of actual final combat ratings across this turn's
         // firing exchanges. A unit firing at multiple targets can have different ratings.
@@ -645,7 +895,7 @@ if(drag&&down&&Math.hypot(p.x-down.x,p.y-down.y)>4)moved=true;if(drag&&moved){re
           const actualFactors=[...(e.attackerFactors||[]),...(e.defenderFactors||[]),...(e.supportFactors||[])]
             .filter(f=>actualPairs.has(f.unit+'>'+f.target)&&Number(f.damage)>0);
           if(!actualFactors.length)continue;
-          const formatFactor=f=>`${f.role} ${f.unit} → ${f.target} | Strength ${f.strength.toLocaleString()} (committed ${fmt(f.committed)}) | Effectiveness ${fmt(f.effectiveness)} vs ${fmt(f.opponentEffectiveness)} (factor ${fmt(f.effectivenessFactor)}) | Efficiency ${fmt(f.efficiency)} (${fmt(f.efficiency*100)}%) | Supply multiplier ${fmt(f.supply)} (${fmt(f.supply*100)}%) | Terrain ${f.terrainName} ×${fmt(f.terrain)} | Matchup ×${fmt(f.matchup)} | Defender IP ×${fmt(f.improvedPosition)} | Random ×${fmt(f.random)} [disabled] | FINAL RATING ×${fmt(f.finalRating)} | Expected casualties ${fmt(f.damage)}`;
+          const formatFactor=f=>`${f.role} ${f.unit} → ${f.target} | Strength ${f.strength.toLocaleString()} (committed ${fmt(f.committed)}) | Morale ${fmt(f.morale)} (factor ${fmt(f.moraleFactor)}) | Supply multiplier ${fmt(f.supply)} (${fmt(f.supply*100)}%) | Target supply vulnerability ×${fmt(f.incomingSupply??1)} | Terrain ${f.terrainName} ×${fmt(f.terrain)} | Matchup ×${fmt(f.matchup)} | Defender IP ×${fmt(f.improvedPosition)} | Random ×${fmt(f.random)} [disabled] | FINAL RATING ×${fmt(f.finalRating)} | Expected casualties ${fmt(f.damage)}`;
           const lines=[`Day ${engine.day}, Hour ${ti} — ${e.attacker} attacks ${e.defender} (increment ${e.increment})`,
             ...actualFactors.map(f=>(f.unit===e.attacker||f.unit===e.defender?'':'SUPPORT: ')+formatFactor(f)),
             `Actual casualties: Blue ${e.blueLoss.toLocaleString()}, Red ${e.redLoss.toLocaleString()}`];
@@ -662,31 +912,51 @@ if(drag&&down&&Math.hypot(p.x-down.x,p.y-down.y)>4)moved=true;if(drag&&moved){re
         if(engagements.length||combatResult.destroyed.length)updateReport(selectedId?byId(selectedId):null);
         await sleep(20);
       }
+      // M5.49: all combat and movement is complete before the sole morale check.
+      const endMorale=window.ARMAGEDDON_COMBAT.endTurn(data.scenario,data.terrainAt,engine.day,dailyCombatParticipants,planner);
+      for(const fallen of endMorale.destroyed){daySummary.destroyed[fallen.side]++;planner.get(fallen.id).length=0;}
+      if(endMorale.retreats.length){status.textContent='End-of-turn morale retreats and advances';await animateRetreat(endMorale.retreats);}
+      if(endMorale.destroyed.length)await animateSurrender(endMorale.destroyed,new Map(data.scenario.divisions.map(d=>[d.id,{col:d.col,row:d.row}])));
+      if(selectedId&&byId(selectedId)?.destroyed){selectedId=null;renderer.setSelection(null);refreshChoices();}
+      updateReport(selectedId?byId(selectedId):null);
+      // Evaluate supply at the actual end-of-turn positions, not the start.
+      renderer.refreshHexControl();
+      const turnSupply=window.ARMAGEDDON_SUPPLY.check(data.scenario,data.terrainAt,(c,r)=>renderer.controlAt(c,r),cities.state);
+      if(renderer.showSupply)renderer.supplyAvailability=turnSupply;
       for(const d of data.scenario.divisions){
         if(d.destroyed)continue;
+        if(!turnSupply.get(d.id))daySummary.outOfSupply[d.side].push({id:d.id,name:d.name||d.id,rating:Number(d.supply)});
         d.supply=Math.max(-9,Math.min(1,(Number.isFinite(d.supply)?d.supply:1)+(turnSupply.get(d.id)?1:-1)));
-        d.efficiency=Math.max(30,Math.min(100,(Number.isFinite(d.efficiency)?d.efficiency:100)+1));
-        d.experience=Math.max(25,Math.min(150,(Number.isFinite(d.experience)?d.experience:75)+1));
+
+        // M5.39: +1 daily survival, plus at most +1 for combat participation (NOT +2 combat bonus).
+        d.experience=Math.max(25,Math.min(120,(Number.isFinite(d.experience)?d.experience:75)+1+(dailyCombatParticipants.has(d.id)?1:0)));
         daySummary.remaining[d.side]+=d.strength;
       }
       for(const d of data.scenario.divisions){
         if(d.destroyed||d.strength<=0||Number(d.supply)>=0)continue;
-        daySummary.negativeSupply[d.side].push({name:d.name||d.id,rating:Number(d.supply)});
+        daySummary.negativeSupply[d.side].push({id:d.id,name:d.name||d.id,rating:Number(d.supply)});
         daySummary.supplyProblems[d.side]++;
       }
-      for(const side of ['Blue','Red'])daySummary.negativeSupply[side].sort((a,b)=>a.name.localeCompare(b.name));
+      for(const side of ['Blue','Red']){daySummary.negativeSupply[side].sort((a,b)=>a.name.localeCompare(b.name));daySummary.outOfSupply[side].sort((a,b)=>a.name.localeCompare(b.name));}
       cities.finishTurn();
       daySummary.routes=data.scenario.divisions.filter(d=>!d.destroyed&&planner.get(d.id).length>0).length;
+      daySummary.fireLines=dsShots.flatMap(group=>group.shots.map(f=>({
+        hour:group.hour,side:byId(f.unit)?.side||'',unit:f.unit,unitId:f.unit,target:f.target,
+        role:f.dsRole||f.role||'Fire',damage:Number(f.damage)||0
+      })));
       latestReport=daySummary;refreshDS();
-      showReport();
+      latestCombatDetail=dsSnapshot()+"\n\nDETAILED COMBAT AUDIT\n"+(combatAudit.filter(entry=>entry.startsWith(`Day ${engine.day}, `)).length?combatAudit.filter(entry=>entry.startsWith(`Day ${engine.day}, `)).join("\n\n"):"No engagements this day.");
+      dayOverlay.hidden=true; // Never interrupt gameplay with an automatic report.
       if(!combatAudit.length)document.getElementById('combatLog').textContent='No combat engagements yet.';
       status.textContent=`Day ${engine.day} complete — movement and combat resolved. Unfinished routes retained for next planning day.`;
       debugLog('Day complete',{day:engine.day,totalMoves:daySummary.moves});
-      engine.nextDay();cities.awardTurn();cities.chargeMaintenance(engine.day);replacements.startDay(engine.day);tiLabel.textContent=`Day ${engine.day} · Planning`;updateGameClock();
+      engine.nextDay();recoverDailyEffectiveness();cities.awardTurn();cities.chargeMaintenance(engine.day);replacements.startDay(engine.day);tiLabel.textContent=`Day ${engine.day} · Planning`;updateGameClock();
+      aiPlannedDay=null; // New day requires a fresh plan, never a mid-day replan.
+      awaitingExecutionConfirmation=false;
       // Persist completed turn only after the next planning state is established.
       if(!saveGame(true))status.textContent+=' Warning: autosave failed; use Save Game.';
     }catch(error){debugLog('EXECUTION ERROR',{message:error.message,stack:error.stack});console.error(error);status.textContent='Execution error: '+error.message;window.alert('Movement execution failed: '+error.message);}
-    finally{window.ARMAGEDDON_EXECUTION_HIDE_ROUTES=false;debugLog('runDay FINALLY',{day:engine.day,engineHour:engine.ti});renderer.visualPositions.clear();renderer.render();executing=false;readyButton.disabled=false;readyButton.textContent='Ready ▶';playtestButton.disabled=false;phaseLabel.textContent='PLANNING PHASE';window.ARMAGEDDON_ROUTES_FROZEN=false;window.ARMAGEDDON_FROZEN_LABELS=null;window.ARMAGEDDON_READY_GOLD_ROUTE=null;updateReport(selectedId?byId(selectedId):null);refreshChoices();}
+    finally{window.ARMAGEDDON_EXECUTION_HIDE_ROUTES=false;debugLog('runDay FINALLY',{day:engine.day,engineHour:engine.ti});renderer.visualPositions.clear();renderer.render();executing=false;readyButton.disabled=false;readyButton.textContent='Ready ▶';awaitingExecutionConfirmation=false;playtestButton.disabled=false;phaseLabel.textContent='PLANNING PHASE';window.ARMAGEDDON_MARCH?.setBattlePhase('planning');window.ARMAGEDDON_ROUTES_FROZEN=false;window.ARMAGEDDON_FROZEN_LABELS=null;window.ARMAGEDDON_READY_GOLD_ROUTE=null;updateReport(selectedId?byId(selectedId):null);refreshChoices();}
   }
   // Single-player Ready: invoke the execution engine directly. Do not depend on
   // Single-player Ready: execute the 10-hour turn directly, with visible diagnostics.
@@ -694,6 +964,11 @@ if(drag&&down&&Math.hypot(p.x-down.x,p.y-down.y)>4)moved=true;if(drag&&moved){re
   readyButton.addEventListener('click',async event=>{
     event.preventDefault();event.stopPropagation();
     if(executing){status.textContent='Turn execution is already running.';return;}
+    // M6.20: one click on Ready starts execution immediately.
+    awaitingExecutionConfirmation=false;
+    readyButton.style.background='#2d644b';
+    window.ARMAGEDDON_MARCH?.unlockBattleMusic();
+    window.ARMAGEDDON_MARCH?.setBattlePhase('execution');
     readyButton.disabled=true;
     window.ARMAGEDDON_EXECUTION_HIDE_ROUTES=true;
     readyButton.textContent='Executing…';
@@ -702,16 +977,17 @@ if(drag&&down&&Math.hypot(p.x-down.x,p.y-down.y)>4)moved=true;if(drag&&moved){re
     status.textContent='Ready clicked — beginning 10-hour turn…';
     try{
       hidePreview();
-      // Snapshot both arrival-label values before movement starts. During
+      prepareAIDay();
+      // Snapshot hours-to-arrival labels before movement starts. During
       // execution divisions consume route steps and movement credit changes;
       // neither event may alter the ETA printed on surviving route hexes.
       const labels=new Map();
       for(const d of data.scenario.divisions){
-        let elapsed=Math.max(0,d.pauseTIs||0),from={col:d.col,row:d.row};
+        let elapsed=Math.max(0,d.pauseTIs||0)-Number(d.tis||0),from={col:d.col,row:d.row};
         for(const point of planner.get(d.id)){
           elapsed+=window.ARMAGEDDON_MOVEMENT.cost(d,data.terrainAt(point.col,point.row),from,point,data.terrainAt);
           const hour=Math.max(1,Math.ceil(elapsed-1e-9));
-          labels.set(d.id+':'+point.col+','+point.row,{hour,turn:Math.min(9,Math.max(1,Math.floor((hour-1)/10)+1))});
+          labels.set(d.id+':'+point.col+','+point.row,{hour});
           elapsed+=(point.pauseCount||0)+(point.pause?1:0);
           from=point;
         }
@@ -724,7 +1000,7 @@ if(drag&&down&&Math.hypot(p.x-down.x,p.y-down.y)>4)moved=true;if(drag&&moved){re
       console.error('Ready execution error',error);
       debugLog('READY EXECUTION ERROR',{message:String(error),stack:error?.stack});
       status.textContent='Execution failed: '+(error?.message||String(error));
-      phaseLabel.textContent='EXECUTION ERROR';
+      phaseLabel.textContent='EXECUTION ERROR';window.ARMAGEDDON_MARCH?.setBattlePhase('planning');
       window.alert('Ready could not execute: '+(error?.message||String(error)));
     }finally{
       if(!executing){window.ARMAGEDDON_EXECUTION_HIDE_ROUTES=false;renderer.render();readyButton.disabled=false;readyButton.textContent='Ready ▶';}
@@ -732,7 +1008,7 @@ if(drag&&down&&Math.hypot(p.x-down.x,p.y-down.y)>4)moved=true;if(drag&&moved){re
   });
   const SAVE_KEY='ARMAGEDDON_M3_SAVE';
   const TURN_START_KEY='ARMAGEDDON_M4_TURN_START';
-  function saveGame(silent=false){if(executing&&!silent){alert('Save during planning, not during turn execution.');return false;}try{const snapshot={version:87,query:location.search,day:engine.day,ti:engine.ti,divisions:data.scenario.divisions,routes:[...planner.routes.entries()],playtest:planner.playtest,playtestSide:window.ARMAGEDDON_VIEW_MODE,treasury:cities.treasury,maintenanceChargedDay:engine.day,cityState:cities.state.map(x=>({pacification:x.pacification,production:x.production,owner:x.owner,occupier:x.occupier})),reserves:{Blue:cities.reserves.Blue.map(r=>({type:r.type,cityIndex:cities.state.indexOf(r.city),side:r.side,id:r.id})),Red:cities.reserves.Red.map(r=>({type:r.type,cityIndex:cities.state.indexOf(r.city),side:r.side,id:r.id}))},report:latestReport,dsDam:[...dsDam],replacementState:replacements.snapshot()};localStorage.setItem(SAVE_KEY,JSON.stringify(snapshot));if(!silent)status.textContent='Game saved in this browser.';return true;}catch(e){if(!silent)alert('Unable to save: '+e.message);return false;}}
+  function saveGame(silent=false){if(executing&&!silent){alert('Save during planning, not during turn execution.');return false;}try{const snapshot={version:88,query:location.search,unitSymbolStyle:renderer.unitSymbolStyle,day:engine.day,ti:engine.ti,divisions:data.scenario.divisions,routes:[...planner.routes.entries()],playtest:planner.playtest,playtestSide:window.ARMAGEDDON_VIEW_MODE,treasury:cities.treasury,maintenanceChargedDay:cities.getMaintenance()?.day,maintenanceTotals:cities.getMaintenance()?.totals,cityState:cities.state.map(x=>({pacification:x.pacification,production:x.production,owner:x.owner,occupier:x.occupier})),reserves:{Blue:cities.reserves.Blue.map(r=>({type:r.type,cityIndex:cities.state.indexOf(r.city),side:r.side,id:r.id})),Red:cities.reserves.Red.map(r=>({type:r.type,cityIndex:cities.state.indexOf(r.city),side:r.side,id:r.id}))},report:latestReport,dsDam:[...dsDam],replacementState:replacements.snapshot()};localStorage.setItem(SAVE_KEY,JSON.stringify(snapshot));if(!silent)status.textContent='Game saved in this browser.';return true;}catch(e){if(!silent)alert('Unable to save: '+e.message);return false;}}
   function saveTurnStart(){
     // Save the same complete serializable game state as Save Game without overwriting the normal save.
     try{
@@ -756,7 +1032,7 @@ if(drag&&down&&Math.hypot(p.x-down.x,p.y-down.y)>4)moved=true;if(drag&&moved){re
     url.searchParams.set('autoReplay','1');
     location.href=url.href;
   });
-  function restoreSaved(){if(!new URLSearchParams(location.search).has('loadSaved'))return;let saved;try{saved=JSON.parse(localStorage.getItem(SAVE_KEY));}catch(e){}if(!saved){alert('No saved game available.');return;}try{data.scenario.divisions.splice(0,data.scenario.divisions.length,...saved.divisions);for(const d of data.scenario.divisions){d.stance='Hold';if(!Number.isFinite(d.experience))d.experience=75;}planner.routes=new Map(saved.routes||[]);setPlaytestSide(saved.playtestSide||'None');engine.day=saved.day;engine.ti=saved.ti||0;engine.lastRouteHeads=new Map(data.scenario.divisions.map(d=>[d.id,engine.head(d.id)]));Object.assign(cities.treasury,saved.treasury||{});(saved.cityState||[]).forEach((x,i)=>{if(cities.state[i]){cities.state[i].pacification=x.pacification;cities.state[i].production=x.production;cities.state[i].owner=x.owner||cities.state[i].city.side;cities.state[i].city.side=cities.state[i].owner;cities.state[i].occupier=x.occupier||null;}});for(const side of ['Blue','Red']){cities.reserves[side].length=0;for(const r of saved.reserves?.[side]||[])if(cities.state[r.cityIndex])cities.reserves[side].push({...r,city:cities.state[r.cityIndex]});}latestReport=saved.report||null;dsDam.clear();for(const [id,n] of saved.dsDam||[])dsDam.set(id,n);dsBattles=[];dsFiring=new Set();dsStart=new Map();dsEffStart=new Map();dsExpStart=new Map();dsModifiers=new Map();refreshDS();replacements.restore(saved.replacementState);if(saved.maintenanceChargedDay===engine.day)cities.setMaintenanceDay(engine.day);else cities.chargeMaintenance(engine.day);cities.render();tiLabel.textContent=`Day ${engine.day} · Planning`;updateGameClock();status.textContent='Saved game loaded.';renderer.render();}catch(e){alert('Could not restore saved game: '+e.message);}}
+  function restoreSaved(){if(!new URLSearchParams(location.search).has('loadSaved'))return;let saved;try{saved=JSON.parse(localStorage.getItem(SAVE_KEY));}catch(e){}if(!saved){alert('No saved game available.');return;}try{data.scenario.divisions.splice(0,data.scenario.divisions.length,...saved.divisions);for(const d of data.scenario.divisions){d.stance='Hold';if(!Number.isFinite(d.experience))d.experience=75;}planner.routes=new Map(saved.routes||[]);for(const d of data.scenario.divisions)if(!planner.get(d.id).length)d.tis=0;setUnitSymbols(saved.unitSymbolStyle||'nato');setPlaytestSide('None');engine.day=saved.day;engine.ti=saved.ti||0;engine.lastRouteHeads=new Map(data.scenario.divisions.map(d=>[d.id,engine.head(d.id)]));Object.assign(cities.treasury,saved.treasury||{});(saved.cityState||[]).forEach((x,i)=>{if(cities.state[i]){cities.state[i].pacification=x.pacification;cities.state[i].production=x.production;cities.state[i].owner=x.owner||cities.state[i].city.side;cities.state[i].city.side=cities.state[i].owner;cities.state[i].occupier=x.occupier||null;}});for(const side of ['Blue','Red']){cities.reserves[side].length=0;for(const r of saved.reserves?.[side]||[])if(cities.state[r.cityIndex])cities.reserves[side].push({...r,city:cities.state[r.cityIndex]});}latestReport=saved.report||null;dsDam.clear();for(const [id,n] of saved.dsDam||[])dsDam.set(id,n);dsBattles=[];dsShots=[];dsFiring=new Set();dsStart=new Map();dsEffStart=new Map();dsExpStart=new Map();dsModifiers=new Map();refreshDS();replacements.restore(saved.replacementState);if(saved.maintenanceChargedDay===engine.day)cities.setMaintenanceDay(engine.day,saved.maintenanceTotals);else cities.chargeMaintenance(engine.day);cities.render();tiLabel.textContent=`Day ${engine.day} · Planning`;updateGameClock();status.textContent='Saved game loaded.';refreshSupplyOverlay();renderer.render();}catch(e){alert('Could not restore saved game: '+e.message);}}
   restoreSaved();
   // Replay restores the entire saved turn-start state, then executes its original
   // orders automatically. Remove the one-shot flag before starting to avoid
